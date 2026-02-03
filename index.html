@@ -1,89 +1,107 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ClawWallet 签名</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ClawWallet - EVM 签名</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"></script>
+    
     <style>
-        body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f4f9; }
-        .card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; width: 80%; }
-        .loading-dots:after { content: ' .'; animation: dots 1s steps(5, end) infinite; }
-        @keyframes dots { 0%, 20% { color: rgba(0,0,0,0); text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0); } 40% { color: black; text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0); } 60% { text-shadow: .25em 0 0 black, .5em 0 0 rgba(0,0,0,0); } 80%, 100% { text-shadow: .25em 0 0 black, .5em 0 0 black; } }
+        :root { --tg-theme-button-color: #2481cc; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: #f4f4f7; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 24px; border-radius: 16px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .amount-box { background: #f8f9fb; padding: 15px; border-radius: 12px; margin: 20px 0; }
+        .amount { font-size: 28px; font-weight: bold; color: var(--tg-theme-button-color); }
+        .address { font-size: 12px; color: #888; word-break: break-all; margin-top: 8px; }
+        .btn { background: var(--tg-theme-button-color); color: white; border: none; padding: 14px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        #status { margin-top: 15px; font-size: 13px; color: #666; }
+        w3m-button { display: flex; justify-content: center; margin-bottom: 15px; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h2 id="title">正在初始化钱包</h2>
-        <p id="info" class="loading-dots">正在安全连接至 Telegram Wallet</p>
-        <div id="ton-connect-button" style="display: none;"></div>
+
+<div class="card">
+    <h2 style="margin:0">确认付款</h2>
+    <div class="amount-box">
+        <div class="amount" id="displayAmount">0.00</div>
+        <div id="displaySymbol" style="font-size:14px; color:#666;">ETH / FX</div>
+        <div class="address" id="displayTo">正在加载地址...</div>
     </div>
 
-    <script>
-        const WebApp = window.Telegram.WebApp;
-        WebApp.ready();
+    <div id="connect-root">
+        <w3m-button></w3m-button>
+    </div>
 
-        // 1. 初始化 TON Connect
-        const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
-            manifestUrl: 'https://clawwallet.vercel.app/tonconnect-manifest.json',
-            buttonRootId: 'ton-connect-button'
-        });
+    <button class="btn" id="transferBtn">确认并签名</button>
+    <div id="status">请先连接钱包</div>
+</div>
 
-        async function initTransfer() {
-            const params = new URLSearchParams(window.location.search);
-            const to = params.get('to');
-            const amount = params.get('amount');
+<script type="module">
+    // 引入 AppKit (WalletConnect)
+    import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.run/@web3modal/wagmi'
+    import { mainnet, base, baseSepolia } from 'https://esm.run/@wagmi/core/chains'
+    import { reconnect, sendTransaction, getAccount, parseEther } from 'https://esm.run/@wagmi/core'
 
-            if (!to || !amount) {
-                document.getElementById('info').innerText = "参数缺失";
-                return;
-            }
+    // --- 配置区 ---
+    const projectId = '5e7a578ca3a6a096cd97a735e12b2253';
+    const metadata = {
+        name: 'ClawWallet',
+        description: 'Telegram AI Wallet Skill',
+        url: 'https://clawwallet.vercel.app',
+        icons: ['https://avatars.githubusercontent.com/u/37784886']
+    }
 
-            // 如果钱包没连接，先让用户点击连接
-            if (!tonConnectUI.connected) {
-                document.getElementById('title').innerText = "请先连接钱包";
-                document.getElementById('info').innerText = "点击下方按钮连接 Telegram Wallet";
-                document.getElementById('ton-connect-button').style.display = 'block';
-                return;
-            }
+    const chains = [mainnet, base, baseSepolia]
+    const wagmiConfig = defaultWagmiConfig({ chains, projectId, metadata })
 
-            // 2. 构造转账消息
-            const transaction = {
-                validUntil: Math.floor(Date.now() / 1000) + 360,
-                messages: [
-                    {
-                        address: to,
-                        amount: (parseFloat(amount) * 1000000000).toString() // TON to nanoTON
-                    }
-                ]
-            };
+    // 初始化 Modal
+    const modal = createWeb3Modal({ wagmiConfig, projectId, chains })
+    reconnect(wagmiConfig)
 
-            try {
-                document.getElementById('title').innerText = "等待签名";
-                document.getElementById('info').innerText = "请在弹出的窗口中确认交易";
-                
-                // 3. 弹出 Telegram Wallet 原生签名框
-                await tonConnectUI.sendTransaction(transaction);
-                
-                document.getElementById('title').innerText = "✅ 发送成功";
-                document.getElementById('info').innerText = "交易已提交至区块链。";
-                WebApp.HapticFeedback.notificationOccurred('success');
-                
-                setTimeout(() => WebApp.close(), 3000);
-            } catch (e) {
-                document.getElementById('title').innerText = "❌ 交易取消";
-                document.getElementById('info').innerText = e.message || "您取消了签名";
-            }
+    // --- 业务逻辑 ---
+    const WebApp = window.Telegram.WebApp;
+    const params = new URLSearchParams(window.location.search);
+    const to = params.get('to');
+    const amount = params.get('amount') || "0";
+
+    document.getElementById('displayAmount').innerText = amount;
+    document.getElementById('displayTo').innerText = to;
+
+    const statusEl = document.getElementById('status');
+    const transferBtn = document.getElementById('transferBtn');
+
+    transferBtn.onclick = async () => {
+        const account = getAccount(wagmiConfig);
+
+        if (!account.isConnected) {
+            statusEl.innerText = "请先点击上方按钮连接钱包";
+            modal.open();
+            return;
         }
 
-        // 监听连接状态，一旦连接成功就触发转账
-        tonConnectUI.onStatusChange(wallet => {
-            if (wallet) initTransfer();
-        });
+        try {
+            statusEl.innerText = "正在请求签名...";
+            WebApp.HapticFeedback.impactOccurred('medium');
 
-        // 初始尝试
-        initTransfer();
-    </script>
+            const hash = await sendTransaction(wagmiConfig, {
+                to: to,
+                value: parseEther(amount),
+            });
+
+            statusEl.innerText = "✅ 交易已发出！";
+            WebApp.showAlert(`转账成功！\nHash: ${hash.substring(0,10)}...`, () => {
+                WebApp.close();
+            });
+        } catch (err) {
+            console.error(err);
+            statusEl.innerText = "❌ 交易取消或失败";
+            WebApp.HapticFeedback.notificationOccurred('error');
+        }
+    };
+
+    WebApp.ready();
+</script>
+
 </body>
 </html>
