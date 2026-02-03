@@ -209,9 +209,7 @@
             </div>
 
             <button class="btn-primary" id="main-btn" disabled>⌛ 正在准备...</button>
-            
-            <div id="wallet-helper">唤起失败？点此手动跳转钱包 App</div>
-            
+            <div id="wallet-helper">唤起失败？点此手动打开钱包 App</div>
             <div id="status-info">网络环境: Ethereum Sepolia</div>
         </div>
     </div>
@@ -222,7 +220,7 @@
         import { reconnect, sendTransaction, writeContract, getAccount, watchAccount } from 'https://esm.sh/@wagmi/core'
         import { parseEther } from 'https://esm.sh/viem'
 
-        // 1. --- 解析业务参数 ---
+        // 1. --- 参数解析与 UI ---
         const params = new URLSearchParams(window.location.search);
         const toAddress = params.get('to');
         const amountStr = (params.get('amount') || "0.00").toString().replace(/[^0-9.]/g, '');
@@ -230,12 +228,10 @@
         const spender = params.get('spender');
         const token = params.get('token');
 
-        // 核心动作判定：有地址和金额，强制转账模式
         const isApprove = !!(token && spender);
         const isTransfer = !!(toAddress && parseFloat(amountStr) > 0);
         let actionType = isApprove ? 'approve' : (isTransfer ? 'transfer' : 'connect');
 
-        // 预计算，减少点击回调延迟
         let precomputedValue = 0n;
         try { precomputedValue = parseEther(amountStr || "0"); } catch(e) {}
 
@@ -260,7 +256,7 @@
         };
         updateUI();
 
-        // 2. --- 配置 Web3Modal ---
+        // 2. --- SDK 配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
         const chains = [sepolia];
         const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
@@ -282,33 +278,45 @@
             themeMode: 'light'
         });
 
-        // 3. --- 动态获取钱包路径 ---
-        const getBestRedirectUrl = async () => {
-            const { connector } = getAccount(config);
-            if (!connector) return null;
+        // 3. --- 动态重定向路径修复 ---
+        const getWalletRedirectUrl = async () => {
+            const { connector, isConnected } = getAccount(config);
+            if (!isConnected || !connector) return null;
 
-            // 策略 A: 尝试从 WalletConnect 会话中提取动态元数据
-            if (connector.id === 'walletConnect') {
-                try {
-                    const provider = await connector.getProvider();
-                    const redirect = provider?.session?.peer?.metadata?.redirect;
-                    const url = redirect?.native || redirect?.universal;
-                    if (url) return url;
-                } catch (e) { console.warn("Session redirect access failed"); }
-            }
-
-            // 策略 B: 常见的钱包 Deep Link 兜底映射
+            // 策略 A: 从连接器名称匹配常见 Deep Link (最快, 成功率高)
             const name = connector.name.toLowerCase();
             if (name.includes('metamask')) return "metamask://";
             if (name.includes('okx')) return "okx://wallet/dapp/details";
             if (name.includes('trust')) return "trust://";
             if (name.includes('tokenpocket')) return "tpoutside://";
+            if (name.includes('imtoken')) return "imtokenv2://";
             if (name.includes('phantom')) return "phantom://";
-            
+            if (name.includes('pundi wallet')) return "fxdapp://";
+
+            // 策略 B: 从 WalletConnect Session 获取 (结构化提取)
+            if (connector.id === 'walletConnect') {
+                try {
+                    const provider = await connector.getProvider();
+                    // 深度探测
+                    const redirect = provider?.session?.peer?.metadata?.redirect;
+                    const url = redirect?.native || redirect?.universal;
+                    if (url) return url;
+                } catch (e) { console.warn("Session metadata access failed"); }
+            }
+
+            // 策略 C: 从本地存储尝试恢复 (Web3Modal 内部存储习惯)
+            try {
+                const recent = localStorage.getItem('WALLETCONNECT_DEEPLINK_CHOICE');
+                if (recent) {
+                    const parsed = JSON.parse(recent);
+                    if (parsed.href) return parsed.href;
+                }
+            } catch (e) {}
+
             return null;
         };
 
-        // 4. --- 交互逻辑 (集成 openLink) ---
+        // 4. --- 核心业务流 ---
         const WebApp = window.Telegram.WebApp;
         WebApp.ready();
         WebApp.expand();
@@ -336,15 +344,19 @@
             try {
                 isProcessing = true;
                 WebApp.MainButton.showProgress();
-                statusInfo.innerText = "正在唤醒钱包签名交易...";
-                helper.style.display = "block";
-
-                // 【核心优化】立即获取路径并尝试 openLink 强推
-                const redirectUrl = await getBestRedirectUrl();
-                if (redirectUrl) {
-                    console.log("Waking up wallet via:", redirectUrl);
-                    WebApp.openLink(redirectUrl, { try_instant_view: false });
+                statusInfo.innerText = "正在唤醒钱包 App 签名交易...";
+                
+                // 【核心修复】立即获取链接并调用 openLink，不进行复杂的异步等待
+                const url = await getWalletRedirectUrl();
+                if (url) {
+                    console.log("Attempting native openLink with:", url);
+                    WebApp.openLink(url, { try_instant_view: false });
+                } else {
+                    // 如果实在找不到 URL，调用 modal 账户视图尝试保活
+                    modal.open({ view: 'Account' });
                 }
+
+                helper.style.display = "block";
 
                 let txHash;
                 if (isApprove) {
@@ -361,14 +373,14 @@
                     });
                 }
 
-                statusInfo.innerText = "✅ 交易已发送！";
+                statusInfo.innerText = "✅ 交易发送成功！";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`操作成功！\nHash: ${txHash.slice(0,10)}...`, () => WebApp.close());
+                WebApp.showAlert(`操作已提交到链上！\nHash: ${txHash.slice(0,10)}...`, () => WebApp.close());
             } catch (err) {
                 console.error("Action Error:", err);
                 WebApp.MainButton.hideProgress();
                 const shortErr = err.shortMessage || err.message || "";
-                statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户拒绝" : "签名超时或环境拦截");
+                statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户取消" : "环境拦截");
                 
                 if (!shortErr.includes("rejected")) {
                     modal.open({ view: 'Account' });
@@ -391,15 +403,13 @@
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...`;
                     
-                    let btnT = "连接成功 - 返回";
-                    if (isApprove) btnT = "确认授权";
-                    else if (isTransfer) btnT = "确认转账";
+                    let btnT = actionType === 'approve' ? "确认授权" : (actionType === 'transfer' ? "确认转账" : "连接成功 - 返回");
                     
                     mainBtn.innerText = "✅ " + btnT;
                     mainBtn.className = "btn-primary btn-success";
                     mainBtn.disabled = false;
                     
-                    statusInfo.innerText = "环境就绪，点击按钮唤醒钱包签名";
+                    statusInfo.innerText = "环境已就绪";
                     WebApp.MainButton.setText(btnT).show().onClick(handleBlockchainAction);
                 } else {
                     connDot.classList.remove('dot-connected');
@@ -415,9 +425,8 @@
         reconnect(config).catch(() => {});
         mainBtn.onclick = handleBlockchainAction;
         
-        // 绑定手动补救逻辑
         helper.onclick = async () => {
-            const url = await getBestRedirectUrl();
+            const url = await getWalletRedirectUrl();
             if (url) WebApp.openLink(url, { try_instant_view: false });
             else modal.open({ view: 'Account' });
         };
