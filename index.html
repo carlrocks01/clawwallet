@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ClawWallet 交易执行终端</title>
+    <title>OpenClaw-Wallet</title>
     <!-- Telegram 官方 WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -52,6 +52,28 @@
             margin-bottom: 16px;
             background: #f1f1f4;
             color: #666;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 12px;
+            margin-bottom: 16px;
+            color: var(--tg-theme-hint-color);
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #ccc;
+        }
+
+        .dot-connected {
+            background-color: #4caf50;
+            box-shadow: 0 0 8px #4caf50;
         }
 
         .amount-display {
@@ -121,6 +143,10 @@
             opacity: 0.9;
         }
 
+        .btn-success {
+            background-color: #4caf50 !important;
+        }
+
         #status-info {
             margin-top: 16px;
             font-size: 13px;
@@ -144,6 +170,12 @@
         <div class="card">
             <div id="action-badge" class="status-badge">正在初始化...</div>
             
+            <!-- 连接状态显示 -->
+            <div class="connection-status" id="conn-status-ui">
+                <span class="dot" id="conn-dot"></span>
+                <span id="conn-text">未连接钱包</span>
+            </div>
+
             <div id="ui-main-content">
                 <div class="amount-display">
                     <p id="label-text" style="font-size: 14px; color: #8e8e93; margin: 0;">交易金额</p>
@@ -164,13 +196,13 @@
                 </div>
             </div>
 
-            <button class="btn-primary" id="connect-btn">🔗 连接钱包</button>
+            <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
             
             <div id="status-info">请确保您的钱包已切换至 Sepolia 网络</div>
         </div>
     </div>
 
-    <!-- 核心逻辑脚本：使用 esm.sh 解决依赖报错 -->
+    <!-- 核心逻辑脚本 -->
     <script type="module">
         import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
         import { sepolia, mainnet } from 'https://esm.sh/@wagmi/core/chains'
@@ -181,8 +213,8 @@
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
         const chains = [sepolia, mainnet];
         const metadata = {
-            name: 'ClawWallet',
-            description: 'AI 驱动的 EVM 交易执行终端',
+            name: 'OpenClaw-Wallet',
+            description: 'EVM Transaction Terminal',
             url: window.location.origin,
             icons: ['https://avatars.githubusercontent.com/u/37784886']
         };
@@ -219,7 +251,9 @@
         const addrEl = document.getElementById('addr');
         const tokenBox = document.getElementById('token-box');
         const statusInfo = document.getElementById('status-info');
-        const connectBtn = document.getElementById('connect-btn');
+        const mainBtn = document.getElementById('main-btn');
+        const connDot = document.getElementById('conn-dot');
+        const connText = document.getElementById('conn-text');
 
         amtEl.innerText = amount;
         symEl.innerText = symbol;
@@ -250,33 +284,55 @@
         });
 
         function onConnected(account) {
-            connectBtn.innerText = `✅ 已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
-            connectBtn.style.backgroundColor = "#4caf50";
-            statusInfo.innerText = "就绪，请使用底部按钮确认交易";
+            // 更新连接状态 UI
+            connDot.classList.add('dot-connected');
+            connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
+            connText.style.color = "#4caf50";
 
-            // 激活 Telegram 主按钮
-            const btnText = action === 'approve' ? `签署授权 ${symbol}` : `确认支付 ${amount} ${symbol}`;
+            // 更新页面按钮状态为“执行交易”
+            const btnText = action === 'approve' ? `签署授权 ${symbol}` : 
+                            (action === 'connect' ? '连接成功 - 返回' : `确认支付 ${amount} ${symbol}`);
+            
+            mainBtn.innerText = `✅ ${btnText}`;
+            mainBtn.classList.add('btn-success');
+            statusInfo.innerText = "钱包已连接，点击上方或底部按钮确认";
+
+            // 同时激活 Telegram 原生主按钮
             WebApp.MainButton.setText(btnText)
                 .show()
                 .onClick(handleExecution);
 
             if (account.chainId !== targetChainId) {
                 statusInfo.innerText = "⚠️ 请切换至 Sepolia 测试网络";
+                mainBtn.innerText = "🔄 切换网络";
+                mainBtn.classList.remove('btn-success');
                 WebApp.MainButton.setText("切换网络并重试");
+                connDot.style.backgroundColor = "#ff9800";
+                connText.innerText = "网络错误";
+                connText.style.color = "#ff9800";
             }
         }
 
         function onDisconnected() {
-            connectBtn.innerText = "🔗 连接钱包";
-            connectBtn.style.backgroundColor = "var(--tg-theme-button-color)";
+            connDot.classList.remove('dot-connected');
+            connDot.style.backgroundColor = "#ccc";
+            connText.innerText = "未连接钱包";
+            connText.style.color = "var(--tg-theme-hint-color)";
+
+            mainBtn.innerText = "🔗 连接钱包";
+            mainBtn.classList.remove('btn-success');
             statusInfo.innerText = "请先连接钱包以继续";
             WebApp.MainButton.hide();
         }
 
-        // 4. --- 核心业务：发送交易 (Broadcasting) ---
-        connectBtn.onclick = () => {
+        // 4. --- 按钮点击逻辑 ---
+        mainBtn.onclick = () => {
             const account = getAccount(config);
-            if (!account.isConnected) modal.open();
+            if (!account.isConnected) {
+                modal.open();
+            } else {
+                handleExecution();
+            }
         };
 
         async function handleExecution() {
