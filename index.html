@@ -282,8 +282,31 @@
             themeMode: 'light'
         });
 
-        // 3. --- 固定 MetaMask 通用链接路径 (恢复最初有效版本) ---
-        const getWalletRedirectUrl = () => {
+        // 3. --- 动态获取钱包重定向路径 (实现多钱包兼容) ---
+        const getWalletRedirectUrl = async () => {
+            const { connector } = getAccount(config);
+            if (!connector) return "https://metamask.app.link/"; // 默认兜底
+
+            // 策略 A: 尝试获取当前 Session 的重定向元数据
+            try {
+                const provider = await connector.getProvider();
+                const session = provider?.session;
+                const redirect = session?.peer?.metadata?.redirect;
+                const url = redirect?.native || redirect?.universal;
+                if (url) return url;
+            } catch (e) {
+                console.warn("无法从 Session 获取重定向 URL");
+            }
+
+            // 策略 B: 根据钱包名称映射常见路径
+            const name = connector.name.toLowerCase();
+            if (name.includes('okx')) return "okx://wallet/dapp/details";
+            if (name.includes('trust')) return "trust://";
+            if (name.includes('tokenpocket')) return "tpoutside://";
+            if (name.includes('metamask')) return "https://metamask.app.link/";
+            if (name.includes('pundi')) return "wc:";
+            
+            // 默认兜底
             return "https://metamask.app.link/";
         };
 
@@ -317,8 +340,8 @@
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包 App 签名交易...";
                 
-                // 使用最初有效的 Universal Link 路径唤起
-                const url = getWalletRedirectUrl();
+                // 动态获取当前连接钱包的路径并唤起
+                const url = await getWalletRedirectUrl();
                 WebApp.openLink(url, { try_instant_view: false });
 
                 helper.style.display = "block";
@@ -393,7 +416,8 @@
         mainBtn.onclick = handleBlockchainAction;
         
         helper.onclick = async () => {
-            WebApp.openLink(getWalletRedirectUrl(), { try_instant_view: false });
+            const url = await getWalletRedirectUrl();
+            WebApp.openLink(url, { try_instant_view: false });
         };
 
         statusInfo.classList.add('pulse');
