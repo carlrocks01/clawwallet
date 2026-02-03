@@ -222,7 +222,7 @@
         import { reconnect, sendTransaction, writeContract, getAccount, watchAccount } from 'https://esm.sh/@wagmi/core'
         import { parseEther } from 'https://esm.sh/viem'
 
-        // 1. --- 立即解析参数 ---
+        // 1. --- 解析业务参数 ---
         const params = new URLSearchParams(window.location.search);
         const toAddress = params.get('to');
         const amountStr = (params.get('amount') || "0.00").toString().replace(/[^0-9.]/g, '');
@@ -230,12 +230,12 @@
         const spender = params.get('spender');
         const token = params.get('token');
 
-        // 核心动作识别逻辑
+        // 核心动作判定：有地址和金额，强制转账模式
         const isApprove = !!(token && spender);
         const isTransfer = !!(toAddress && parseFloat(amountStr) > 0);
         let actionType = isApprove ? 'approve' : (isTransfer ? 'transfer' : 'connect');
 
-        // 预计算金额
+        // 预计算，减少点击回调延迟
         let precomputedValue = 0n;
         try { precomputedValue = parseEther(amountStr || "0"); } catch(e) {}
 
@@ -260,7 +260,7 @@
         };
         updateUI();
 
-        // 2. --- SDK 初始化 ---
+        // 2. --- 配置 Web3Modal ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
         const chains = [sepolia];
         const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
@@ -282,7 +282,33 @@
             themeMode: 'light'
         });
 
-        // 3. --- 核心交互逻辑 (集成建议的 openLink) ---
+        // 3. --- 动态获取钱包路径 ---
+        const getBestRedirectUrl = async () => {
+            const { connector } = getAccount(config);
+            if (!connector) return null;
+
+            // 策略 A: 尝试从 WalletConnect 会话中提取动态元数据
+            if (connector.id === 'walletConnect') {
+                try {
+                    const provider = await connector.getProvider();
+                    const redirect = provider?.session?.peer?.metadata?.redirect;
+                    const url = redirect?.native || redirect?.universal;
+                    if (url) return url;
+                } catch (e) { console.warn("Session redirect access failed"); }
+            }
+
+            // 策略 B: 常见的钱包 Deep Link 兜底映射
+            const name = connector.name.toLowerCase();
+            if (name.includes('metamask')) return "metamask://";
+            if (name.includes('okx')) return "okx://wallet/dapp/details";
+            if (name.includes('trust')) return "trust://";
+            if (name.includes('tokenpocket')) return "tpoutside://";
+            if (name.includes('phantom')) return "phantom://";
+            
+            return null;
+        };
+
+        // 4. --- 交互逻辑 (集成 openLink) ---
         const WebApp = window.Telegram.WebApp;
         WebApp.ready();
         WebApp.expand();
@@ -293,37 +319,8 @@
 
         let isProcessing = false;
 
-        // 动态获取当前钱包的唤起链接
-        const getWalletRedirectUrl = async () => {
-            const { connector } = getAccount(config);
-            if (connector?.id === 'walletConnect') {
-                try {
-                    const provider = await connector.getProvider();
-                    // 尝试从 WalletConnect 会话中提取钱包提供的重定向元数据
-                    const redirect = provider?.session?.peer?.metadata?.redirect;
-                    return redirect?.native || redirect?.universal || null;
-                } catch (e) {
-                    console.warn("Failed to get redirect info", e);
-                }
-            }
-            return null;
-        };
-
-        // 强力唤起函数
-        const forceWakeUpWallet = async () => {
-            const url = await getWalletRedirectUrl();
-            if (url) {
-                console.log("Waking up wallet with link:", url);
-                WebApp.openLink(url, { try_instant_view: false });
-            } else {
-                // 如果没有获取到特定钱包链接，则回退到 Account 视图
-                modal.open({ view: 'Account' });
-            }
-        };
-
         const handleBlockchainAction = async () => {
             const account = getAccount(config);
-            
             if (!account.isConnected) {
                 modal.open();
                 return;
@@ -340,11 +337,14 @@
                 isProcessing = true;
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包签名交易...";
-                
                 helper.style.display = "block";
 
-                // 【核心优化点】在发起交易的同时，动态获取钱包路径并尝试 openLink 强推
-                forceWakeUpWallet();
+                // 【核心优化】立即获取路径并尝试 openLink 强推
+                const redirectUrl = await getBestRedirectUrl();
+                if (redirectUrl) {
+                    console.log("Waking up wallet via:", redirectUrl);
+                    WebApp.openLink(redirectUrl, { try_instant_view: false });
+                }
 
                 let txHash;
                 if (isApprove) {
@@ -363,11 +363,10 @@
 
                 statusInfo.innerText = "✅ 交易已发送！";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`转账成功提交！\nHash: ${txHash.slice(0,10)}...`, () => WebApp.close());
+                WebApp.showAlert(`操作成功！\nHash: ${txHash.slice(0,10)}...`, () => WebApp.close());
             } catch (err) {
                 console.error("Action Error:", err);
                 WebApp.MainButton.hideProgress();
-                
                 const shortErr = err.shortMessage || err.message || "";
                 statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户拒绝" : "签名超时或环境拦截");
                 
@@ -381,7 +380,7 @@
             }
         };
 
-        // 4. --- 监听器 ---
+        // 5. --- 监听器 ---
         watchAccount(config, {
             onChange(account) {
                 const connDot = document.getElementById('conn-dot');
@@ -392,7 +391,6 @@
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...`;
                     
-                    // 文案锁定逻辑
                     let btnT = "连接成功 - 返回";
                     if (isApprove) btnT = "确认授权";
                     else if (isTransfer) btnT = "确认转账";
@@ -416,7 +414,13 @@
 
         reconnect(config).catch(() => {});
         mainBtn.onclick = handleBlockchainAction;
-        helper.onclick = () => forceWakeUpWallet();
+        
+        // 绑定手动补救逻辑
+        helper.onclick = async () => {
+            const url = await getBestRedirectUrl();
+            if (url) WebApp.openLink(url, { try_instant_view: false });
+            else modal.open({ view: 'Account' });
+        };
 
         statusInfo.classList.add('pulse');
     </script>
