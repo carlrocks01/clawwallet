@@ -147,10 +147,6 @@
             background-color: #4caf50 !important;
         }
 
-        .btn-warning {
-            background-color: #ff9800 !important;
-        }
-
         #status-info {
             margin-top: 16px;
             font-size: 13px;
@@ -199,24 +195,23 @@
                 </div>
             </div>
 
-            <!-- 只有一个动态按钮，根据状态变化功能 -->
             <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
             
-            <div id="status-info">默认网络: Ethereum Sepolia</div>
+            <div id="status-info">网络: Ethereum Sepolia</div>
         </div>
     </div>
 
     <script type="module">
         import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
-        import { sepolia, mainnet } from 'https://esm.sh/@wagmi/core/chains'
+        import { sepolia } from 'https://esm.sh/@wagmi/core/chains'
         import { reconnect, sendTransaction, writeContract, getAccount, watchAccount, switchChain } from 'https://esm.sh/@wagmi/core'
         import { parseEther } from 'https://esm.sh/viem'
 
         // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
         
-        // 强制使用 Sepolia
-        const chains = [sepolia, mainnet];
+        // 仅包含 Sepolia 以确保默认环境纯净
+        const chains = [sepolia];
         const metadata = {
             name: 'OpenClaw-Wallet',
             description: 'EVM Transaction Terminal',
@@ -278,22 +273,7 @@
         }
 
         // 3. --- 核心交互逻辑 ---
-        let isSwitching = false;
-
-        const handleSwitchChain = async () => {
-            if (isSwitching) return;
-            isSwitching = true;
-            statusInfo.innerText = "正在请求切换网络...";
-            try {
-                await switchChain(config, { chainId: targetChainId });
-                statusInfo.innerText = "网络切换成功";
-            } catch (e) {
-                console.error("Switch chain error:", e);
-                WebApp.showAlert(`切换失败：请在钱包 App 中手动选择 Ethereum Sepolia 网络`);
-            } finally {
-                isSwitching = false;
-            }
-        };
+        let isProcessing = false;
 
         const onActionTrigger = async () => {
             const account = getAccount(config);
@@ -303,10 +283,22 @@
                 return;
             }
 
-            // 如果网络不匹配，先执行切换
+            if (isProcessing) return;
+            isProcessing = true;
+
+            // 如果网络不匹配，静默尝试切换
             if (account.chainId !== targetChainId) {
-                await handleSwitchChain();
-                return;
+                statusInfo.innerText = "正在尝试切换到 Sepolia 网络...";
+                try {
+                    await switchChain(config, { chainId: targetChainId });
+                    isProcessing = false;
+                    return; // 切换成功后 watchAccount 会触发 UI 更新，用户再次点击即可
+                } catch (e) {
+                    console.error("Switch chain error:", e);
+                    WebApp.showAlert(`网络不匹配：请手动在钱包中选择 Sepolia 网络`);
+                    isProcessing = false;
+                    return;
+                }
             }
 
             if (action === 'connect') {
@@ -340,6 +332,8 @@
                 WebApp.MainButton.hideProgress();
                 statusInfo.innerText = "❌ 错误: " + (err.shortMessage || "用户拒绝或失败");
                 WebApp.HapticFeedback.notificationOccurred('error');
+            } finally {
+                isProcessing = false;
             }
         };
 
@@ -347,35 +341,30 @@
         watchAccount(config, {
             onChange(account) {
                 WebApp.MainButton.offClick(onActionTrigger);
-                WebApp.MainButton.offClick(handleSwitchChain);
                 
                 if (account.isConnected) {
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
                     
+                    const btnText = action === 'approve' ? `确认授权 ${symbol}` : 
+                                    (action === 'connect' ? '连接成功 - 返回' : `确认支付 ${amount} ${symbol}`);
+                    
+                    mainBtn.innerText = `✅ ${btnText}`;
+                    mainBtn.className = "btn-primary btn-success";
+                    
                     if (account.chainId !== targetChainId) {
-                        // 网络不匹配：主按钮兼具切换功能
-                        mainBtn.innerText = "🔄 切换至 Sepolia 网络";
-                        mainBtn.className = "btn-primary btn-warning";
-                        statusInfo.innerText = "⚠️ 链不匹配，请点击按钮切换";
-                        
-                        WebApp.MainButton.setText("切换网络").show().onClick(handleSwitchChain);
+                        statusInfo.innerText = "⚠️ 当前链不匹配，点击按钮将尝试切换";
                     } else {
-                        // 网络正确：主按钮执行交易
-                        const btnText = action === 'approve' ? `确认授权 ${symbol}` : 
-                                        (action === 'connect' ? '连接成功 - 返回' : `确认支付 ${amount} ${symbol}`);
-                        mainBtn.innerText = `✅ ${btnText}`;
-                        mainBtn.className = "btn-primary btn-success";
-                        statusInfo.innerText = "网络正确，可以进行下一步";
-                        
-                        WebApp.MainButton.setText(btnText).show().onClick(onActionTrigger);
+                        statusInfo.innerText = "网络就绪，可以进行操作";
                     }
+                    
+                    WebApp.MainButton.setText(btnText).show().onClick(onActionTrigger);
                 } else {
                     connDot.classList.remove('dot-connected');
                     connText.innerText = "未连接钱包";
                     mainBtn.innerText = "🔗 连接钱包";
                     mainBtn.className = "btn-primary";
-                    statusInfo.innerText = "请连接支持 Sepolia 的钱包";
+                    statusInfo.innerText = "请连接 Sepolia 钱包";
                     WebApp.MainButton.hide();
                 }
             }
