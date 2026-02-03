@@ -151,6 +151,12 @@
             background-color: #ff9800 !important;
         }
 
+        .btn-disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            filter: grayscale(0.5);
+        }
+
         #status-info {
             margin-top: 16px;
             font-size: 13px;
@@ -200,6 +206,7 @@
             </div>
 
             <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
+            <button class="btn-primary btn-warning" id="switch-btn" style="margin-top: 12px; display: none;">🔄 切换至 Sepolia 链</button>
             
             <div id="status-info">默认网络: Ethereum Sepolia</div>
         </div>
@@ -214,7 +221,6 @@
         // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
         
-        // 确保 sepolia 为第一顺位，强制大部分钱包默认选择
         const chains = [sepolia, mainnet];
         const metadata = {
             name: 'OpenClaw-Wallet',
@@ -229,7 +235,7 @@
             projectId, 
             chains,
             enableAnalytics: false,
-            defaultChain: sepolia, // 显式设置默认链
+            defaultChain: sepolia, 
             themeMode: 'light'
         });
         
@@ -256,6 +262,7 @@
         const tokenBox = document.getElementById('token-box');
         const statusInfo = document.getElementById('status-info');
         const mainBtn = document.getElementById('main-btn');
+        const switchBtn = document.getElementById('switch-btn');
         const connDot = document.getElementById('conn-dot');
         const connText = document.getElementById('conn-text');
 
@@ -279,6 +286,21 @@
         // 3. --- 核心交互逻辑 ---
         let isSwitching = false;
 
+        const handleSwitchChain = async () => {
+            if (isSwitching) return;
+            isSwitching = true;
+            statusInfo.innerText = "正在请求切换网络...";
+            try {
+                await switchChain(config, { chainId: targetChainId });
+                statusInfo.innerText = "网络切换成功";
+            } catch (e) {
+                console.error("Switch chain error:", e);
+                WebApp.showAlert(`切换失败：请在钱包 App 中手动选择 Ethereum Sepolia 网络 (ChainID: ${targetChainId})`);
+            } finally {
+                isSwitching = false;
+            }
+        };
+
         const onActionTrigger = async () => {
             const account = getAccount(config);
             
@@ -287,24 +309,11 @@
                 return;
             }
 
-            // 网络检查与切换逻辑
             if (account.chainId !== targetChainId) {
-                if (isSwitching) return;
-                isSwitching = true;
-                statusInfo.innerText = "正在向钱包申请切换至 Sepolia...";
-                
-                try {
-                    await switchChain(config, { chainId: targetChainId });
-                } catch (e) {
-                    console.error("Switch chain error:", e);
-                    WebApp.showAlert(`切换失败：请在钱包 App 中手动选择 Ethereum Sepolia (ChainID: ${targetChainId})`);
-                } finally {
-                    isSwitching = false;
-                }
+                await handleSwitchChain();
                 return;
             }
 
-            // 执行业务逻辑
             if (action === 'connect') {
                 WebApp.close();
                 return;
@@ -312,7 +321,7 @@
 
             try {
                 WebApp.MainButton.showProgress();
-                statusInfo.innerText = "⏳ 请在钱包中确认签名...";
+                statusInfo.innerText = "⏳ 请在钱包中确认交易...";
                 
                 let txHash;
                 if (action === 'approve') {
@@ -339,25 +348,35 @@
             }
         };
 
-        // 4. --- 监听器 ---
+        // 4. --- 状态监听器 ---
         watchAccount(config, {
             onChange(account) {
+                // 重置 TG 按钮监听
                 WebApp.MainButton.offClick(onActionTrigger);
+                WebApp.MainButton.offClick(handleSwitchChain);
                 
                 if (account.isConnected) {
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
                     
                     if (account.chainId !== targetChainId) {
-                        mainBtn.innerText = "🔄 切换至 Sepolia 链";
-                        mainBtn.className = "btn-primary btn-warning";
-                        statusInfo.innerText = "网络不匹配，请点击按钮切换";
-                        WebApp.MainButton.setText("切换网络").show().onClick(onActionTrigger);
+                        // 网络错误：显示两个按钮
+                        const actionText = action === 'approve' ? '授权代币' : '确认支付';
+                        mainBtn.innerText = `✅ ${actionText} (待切换网络)`;
+                        mainBtn.className = "btn-primary btn-disabled";
+                        
+                        switchBtn.style.display = "block";
+                        statusInfo.innerText = "⚠️ 网络不匹配，请先点击下方按钮切换网络";
+                        
+                        WebApp.MainButton.setText("切换网络").show().onClick(handleSwitchChain);
                     } else {
+                        // 网络正确：隐藏切换按钮
                         const btnText = action === 'approve' ? `确认授权 ${symbol}` : 
-                                        (action === 'connect' ? '授权成功 - 点击返回' : `确认支付 ${amount} ${symbol}`);
+                                        (action === 'connect' ? '连接成功 - 点击返回' : `确认支付 ${amount} ${symbol}`);
                         mainBtn.innerText = `✅ ${btnText}`;
                         mainBtn.className = "btn-primary btn-success";
+                        
+                        switchBtn.style.display = "none";
                         statusInfo.innerText = "网络正确，可以进行下一步";
                         WebApp.MainButton.setText(btnText).show().onClick(onActionTrigger);
                     }
@@ -366,6 +385,7 @@
                     connText.innerText = "未连接钱包";
                     mainBtn.innerText = "🔗 连接钱包";
                     mainBtn.className = "btn-primary";
+                    switchBtn.style.display = "none";
                     statusInfo.innerText = "请先连接支持 Sepolia 的钱包";
                     WebApp.MainButton.hide();
                 }
@@ -373,6 +393,7 @@
         });
 
         mainBtn.onclick = onActionTrigger;
+        switchBtn.onclick = handleSwitchChain;
         statusInfo.classList.add('pulse');
     </script>
 </body>
