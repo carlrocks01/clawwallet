@@ -174,15 +174,14 @@
         <div class="card">
             <div id="action-badge" class="status-badge">正在初始化...</div>
             
-            <!-- 连接状态显示 -->
-            <div class="connection-status" id="conn-status-ui">
+            <div class="connection-status">
                 <span class="dot" id="conn-dot"></span>
                 <span id="conn-text">未连接钱包</span>
             </div>
 
             <div id="ui-main-content">
                 <div class="amount-display">
-                    <p id="label-text" style="font-size: 14px; color: #8e8e93; margin: 0;">交易金额</p>
+                    <p style="font-size: 14px; color: #8e8e93; margin: 0;">交易金额</p>
                     <div class="amount-value">
                         <span id="amt">0.00</span><span class="currency" id="sym">ETH</span>
                     </div>
@@ -191,10 +190,10 @@
                 <div class="details-box">
                     <div class="detail-item">
                         <div id="target-label" class="detail-label">目标地址</div>
-                        <div id="addr" class="detail-value">正在解析参数...</div>
+                        <div id="addr" class="detail-value">正在解析...</div>
                     </div>
                     <div id="token-box" class="detail-item" style="display:none;">
-                        <div class="detail-label">代币合约 (Contract)</div>
+                        <div class="detail-label">代币合约</div>
                         <div id="token-addr" class="detail-value">...</div>
                     </div>
                 </div>
@@ -202,11 +201,10 @@
 
             <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
             
-            <div id="status-info">请确保您的钱包已切换至 Sepolia 网络</div>
+            <div id="status-info">默认网络: Ethereum Sepolia</div>
         </div>
     </div>
 
-    <!-- 核心逻辑脚本 -->
     <script type="module">
         import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
         import { sepolia, mainnet } from 'https://esm.sh/@wagmi/core/chains'
@@ -215,12 +213,13 @@
 
         // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
-        // 将 sepolia 放在首位，使其成为默认首选网络
+        
+        // 确保 sepolia 为第一顺位，强制大部分钱包默认选择
         const chains = [sepolia, mainnet];
         const metadata = {
             name: 'OpenClaw-Wallet',
             description: 'EVM Transaction Terminal',
-            url: window.location.origin,
+            url: window.location.origin || 'https://clawwallet.vercel.app',
             icons: ['https://avatars.githubusercontent.com/u/37784886']
         };
 
@@ -230,12 +229,13 @@
             projectId, 
             chains,
             enableAnalytics: false,
+            defaultChain: sepolia, // 显式设置默认链
             themeMode: 'light'
         });
         
-        try { reconnect(config); } catch (e) { console.warn("Reconnection failed"); }
+        try { reconnect(config); } catch (e) {}
 
-        // 2. --- Telegram 环境适配 ---
+        // 2. --- Telegram WebApp 初始化 ---
         const WebApp = window.Telegram.WebApp;
         WebApp.ready();
         WebApp.expand();
@@ -247,9 +247,8 @@
         const token = params.get('token');
         const amount = params.get('amount') || "0.00";
         const symbol = params.get('symbol') || "ETH";
-        const targetChainId = sepolia.id; // ChainID: 11155111
+        const targetChainId = sepolia.id;
 
-        // UI 填充
         const badgeEl = document.getElementById('action-badge');
         const amtEl = document.getElementById('amt');
         const symEl = document.getElementById('sym');
@@ -266,113 +265,46 @@
         if (action === 'approve') {
             badgeEl.innerText = "代币授权 (Approve)";
             addrEl.innerText = spender;
-            document.getElementById('target-label').innerText = "授权给 (Spender)";
+            document.getElementById('target-label').innerText = "授权给";
             tokenBox.style.display = "block";
             document.getElementById('token-addr').innerText = token;
         } else if (action === 'transfer') {
             badgeEl.innerText = "转账确认 (Transfer)";
             addrEl.innerText = to;
         } else if (action === 'connect') {
-            badgeEl.innerText = "钱包授权 (Connect)";
+            badgeEl.innerText = "钱包连接";
             document.getElementById('ui-main-content').style.display = "none";
         }
 
-        // 3. --- 钱包状态监听 ---
-        watchAccount(config, {
-            onChange(account) {
-                if (account.isConnected) {
-                    onConnected(account);
-                } else {
-                    onDisconnected();
-                }
-            }
-        });
+        // 3. --- 核心交互逻辑 ---
+        let isSwitching = false;
 
-        // 命名函数以便清理监听器
-        const onMainButtonClick = () => handleExecution();
-
-        function onConnected(account) {
-            // 清理之前的 TG 按钮监听器，防止重复绑定
-            WebApp.MainButton.offClick(onMainButtonClick);
-
-            // 检查网络
-            if (account.chainId !== targetChainId) {
-                // 网络错误状态
-                connDot.style.backgroundColor = "#ff9800";
-                connDot.classList.remove('dot-connected');
-                connText.innerText = "网络错误: 请切换至 Sepolia";
-                connText.style.color = "#ff9800";
-
-                mainBtn.innerText = "🔄 点击切换至 Sepolia 网络";
-                mainBtn.classList.remove('btn-success');
-                mainBtn.classList.add('btn-warning');
-
-                statusInfo.innerText = `⚠️ 当前 ChainID: ${account.chainId} (预期: ${targetChainId})`;
-                
-                WebApp.MainButton.setText("切换网络")
-                    .show()
-                    .onClick(onMainButtonClick);
-                return;
-            }
-
-            // 正常连接状态
-            connDot.classList.add('dot-connected');
-            connDot.style.backgroundColor = "#4caf50";
-            connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
-            connText.style.color = "#4caf50";
-
-            const btnText = action === 'approve' ? `签署授权 ${symbol}` : 
-                            (action === 'connect' ? '连接成功 - 返回' : `确认支付 ${amount} ${symbol}`);
-            
-            mainBtn.innerText = `✅ ${btnText}`;
-            mainBtn.classList.remove('btn-warning');
-            mainBtn.classList.add('btn-success');
-            statusInfo.innerText = "网络正确，请点击确认";
-
-            WebApp.MainButton.setText(btnText)
-                .show()
-                .onClick(onMainButtonClick);
-        }
-
-        function onDisconnected() {
-            WebApp.MainButton.offClick(onMainButtonClick);
-            connDot.classList.remove('dot-connected');
-            connDot.style.backgroundColor = "#ccc";
-            connText.innerText = "未连接钱包";
-            connText.style.color = "var(--tg-theme-hint-color)";
-
-            mainBtn.innerText = "🔗 连接钱包";
-            mainBtn.classList.remove('btn-success', 'btn-warning');
-            statusInfo.innerText = "请先连接钱包以继续";
-            WebApp.MainButton.hide();
-        }
-
-        // 4. --- 按钮点击逻辑 ---
-        mainBtn.onclick = () => {
+        const onActionTrigger = async () => {
             const account = getAccount(config);
+            
             if (!account.isConnected) {
                 modal.open();
-            } else {
-                handleExecution();
+                return;
             }
-        };
 
-        async function handleExecution() {
-            const account = getAccount(config);
-
-            // 自动检查网络
+            // 网络检查与切换逻辑
             if (account.chainId !== targetChainId) {
+                if (isSwitching) return;
+                isSwitching = true;
+                statusInfo.innerText = "正在向钱包申请切换至 Sepolia...";
+                
                 try {
-                    statusInfo.innerText = "正在向钱包发起切换网络请求...";
-                    // 强制发起切换
                     await switchChain(config, { chainId: targetChainId });
                 } catch (e) {
-                    console.error(e);
-                    WebApp.showAlert(`切换失败。请在钱包 App 中手动选择 Ethereum Sepolia 网络 (ID: ${targetChainId})`);
+                    console.error("Switch chain error:", e);
+                    WebApp.showAlert(`切换失败：请在钱包 App 中手动选择 Ethereum Sepolia (ChainID: ${targetChainId})`);
+                } finally {
+                    isSwitching = false;
                 }
                 return;
             }
 
+            // 执行业务逻辑
             if (action === 'connect') {
                 WebApp.close();
                 return;
@@ -380,17 +312,13 @@
 
             try {
                 WebApp.MainButton.showProgress();
-                statusInfo.innerText = "⏳ 正在请求钱包签名并广播交易...";
+                statusInfo.innerText = "⏳ 请在钱包中确认签名...";
                 
                 let txHash;
                 if (action === 'approve') {
                     txHash = await writeContract(config, {
                         address: token,
-                        abi: [{
-                            "inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
-                            "name": "approve", "outputs": [{"name": "", "type": "bool"}],
-                            "stateMutability": "nonpayable", "type": "function"
-                        }],
+                        abi: [{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}],
                         functionName: 'approve',
                         args: [spender, parseEther(amount)]
                     });
@@ -401,19 +329,50 @@
                     });
                 }
 
-                statusInfo.innerText = "✅ 交易已在区块链上成功广播！";
+                statusInfo.innerText = "✅ 交易已发送！";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                
-                WebApp.showAlert(`交易成功！\nHash: ${txHash.slice(0,12)}...`, () => {
-                    WebApp.close();
-                });
+                WebApp.showAlert(`交易成功！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
             } catch (err) {
                 WebApp.MainButton.hideProgress();
-                statusInfo.innerText = "❌ 失败: " + (err.shortMessage || "用户拒绝或余额不足");
+                statusInfo.innerText = "❌ 错误: " + (err.shortMessage || "用户拒绝或失败");
                 WebApp.HapticFeedback.notificationOccurred('error');
             }
-        }
+        };
 
+        // 4. --- 监听器 ---
+        watchAccount(config, {
+            onChange(account) {
+                WebApp.MainButton.offClick(onActionTrigger);
+                
+                if (account.isConnected) {
+                    connDot.classList.add('dot-connected');
+                    connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
+                    
+                    if (account.chainId !== targetChainId) {
+                        mainBtn.innerText = "🔄 切换至 Sepolia 链";
+                        mainBtn.className = "btn-primary btn-warning";
+                        statusInfo.innerText = "网络不匹配，请点击按钮切换";
+                        WebApp.MainButton.setText("切换网络").show().onClick(onActionTrigger);
+                    } else {
+                        const btnText = action === 'approve' ? `确认授权 ${symbol}` : 
+                                        (action === 'connect' ? '授权成功 - 点击返回' : `确认支付 ${amount} ${symbol}`);
+                        mainBtn.innerText = `✅ ${btnText}`;
+                        mainBtn.className = "btn-primary btn-success";
+                        statusInfo.innerText = "网络正确，可以进行下一步";
+                        WebApp.MainButton.setText(btnText).show().onClick(onActionTrigger);
+                    }
+                } else {
+                    connDot.classList.remove('dot-connected');
+                    connText.innerText = "未连接钱包";
+                    mainBtn.innerText = "🔗 连接钱包";
+                    mainBtn.className = "btn-primary";
+                    statusInfo.innerText = "请先连接支持 Sepolia 的钱包";
+                    WebApp.MainButton.hide();
+                }
+            }
+        });
+
+        mainBtn.onclick = onActionTrigger;
         statusInfo.classList.add('pulse');
     </script>
 </body>
