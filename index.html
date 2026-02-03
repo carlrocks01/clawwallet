@@ -104,10 +104,6 @@
             margin-bottom: 12px;
         }
 
-        .detail-item:last-child {
-            margin-bottom: 0;
-        }
-
         .detail-label {
             font-size: 11px;
             color: var(--tg-theme-hint-color);
@@ -213,7 +209,8 @@
             </div>
 
             <button class="btn-primary" id="main-btn" disabled>⌛ 正在准备...</button>
-            <div id="wallet-helper">唤起失败？点此手动打开钱包 App</div>
+            <div id="wallet-helper">唤起失败？点此手动跳转钱包 App</div>
+            
             <div id="status-info">网络环境: Ethereum Sepolia</div>
         </div>
     </div>
@@ -224,7 +221,7 @@
         import { reconnect, sendTransaction, writeContract, getAccount, watchAccount } from 'https://esm.sh/@wagmi/core'
         import { parseEther } from 'https://esm.sh/viem'
 
-        // 1. --- 参数解析与 UI ---
+        // 1. --- 参数解析 ---
         const params = new URLSearchParams(window.location.search);
         const toAddress = params.get('to');
         const amountStr = (params.get('amount') || "0.00").toString().replace(/[^0-9.]/g, '');
@@ -260,7 +257,7 @@
         };
         updateUI();
 
-        // 2. --- SDK 配置 ---
+        // 2. --- SDK 初始化 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
         const chains = [sepolia];
         const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
@@ -282,44 +279,39 @@
             themeMode: 'light'
         });
 
-        const WALLET_LINK_RULES = [
-          {
-            name: 'MetaMask',
-            match: /metamask/i,
-            url: 'https://metamask.app.link/'
-          },
-          {
-            name: 'OKX',
-            match: /okx/i,
-            url: 'https://www.okx.com/download'
-          },
-          {
-            name: 'Trust Wallet',
-            match: /trust/i,
-            url: 'https://link.trustwallet.com/'
-          },
-          {
-            name: 'TokenPocket',
-            match: /tokenpocket|tp/i,
-            url: 'https://www.tokenpocket.pro/'
-          },
-          {
-            name: 'Bitget',
-            match: /bitget/i,
-            url: 'https://www.bitget.com/download'
-          }
-        ];
+        // 3. --- 动态重定向逻辑 (模仿 Uniswap) ---
+        const getBestRedirectUrl = async () => {
+            const { connector } = getAccount(config);
+            if (!connector) return null;
 
-        function getWalletRedirectUrl() {
-          const { connector } = getAccount(config);
-          if (!connector) return null;
+            // 策略 A: 检查 LocalStorage (Uniswap 同款逻辑)
+            try {
+                const choice = localStorage.getItem('WALLETCONNECT_DEEPLINK_CHOICE');
+                if (choice) {
+                    const parsed = JSON.parse(choice);
+                    if (parsed.href) return parsed.href;
+                }
+            } catch (e) {}
 
-          const name = connector.name || '';
-          const rule = WALLET_LINK_RULES.find(r => r.match.test(name));
-          return rule?.url || null;
-        }
+            // 策略 B: 从 Session Metadata 中提取
+            try {
+                const provider = await connector.getProvider();
+                const session = provider?.session;
+                const redirect = session?.peer?.metadata?.redirect;
+                const url = redirect?.native || redirect?.universal;
+                if (url) return url;
+            } catch (e) {}
 
-        // 4. --- 核心业务流 ---
+            // 策略 C: 针对 Pundi Wallet 的显式兜底
+            const name = connector.name.toLowerCase();
+            if (name.includes('pundi')) return "wc://"; // Pundi X / Pundi Wallet 通常响应 wc: 协议
+            if (name.includes('metamask')) return "https://metamask.app.link/";
+            if (name.includes('okx')) return "okx://wallet/dapp/details";
+            
+            return "https://metamask.app.link/"; // 最终兜底
+        };
+
+        // 4. --- 业务流 ---
         const WebApp = window.Telegram.WebApp;
         WebApp.ready();
         WebApp.expand();
@@ -349,9 +341,11 @@
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包 App 签名交易...";
                 
-                // 动态获取当前连接钱包的路径并唤起
-                const url = await getWalletRedirectUrl();
-                WebApp.openLink(url, { try_instant_view: false });
+                // 【核心优化】同步获取 URL 并立即调用 openLink
+                const url = await getBestRedirectUrl();
+                if (url) {
+                    WebApp.openLink(url, { try_instant_view: false });
+                }
 
                 helper.style.display = "block";
 
@@ -372,12 +366,12 @@
 
                 statusInfo.innerText = "✅ 交易发送成功！";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`操作已提交到链上！\nHash: ${txHash.slice(0,10)}...`, () => WebApp.close());
+                WebApp.showAlert(`操作已成功提交！`, () => WebApp.close());
             } catch (err) {
                 console.error("Action Error:", err);
                 WebApp.MainButton.hideProgress();
                 const shortErr = err.shortMessage || err.message || "";
-                statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户取消" : "环境拦截");
+                statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户取消" : "签名超时");
                 
                 if (!shortErr.includes("rejected")) {
                     modal.open({ view: 'Account' });
@@ -408,7 +402,7 @@
                     mainBtn.className = "btn-primary btn-success";
                     mainBtn.disabled = false;
                     
-                    statusInfo.innerText = "环境已就绪";
+                    statusInfo.innerText = "环境就绪";
                     WebApp.MainButton.setText(btnT).show().onClick(handleBlockchainAction);
                 } else {
                     connDot.classList.remove('dot-connected');
@@ -425,8 +419,8 @@
         mainBtn.onclick = handleBlockchainAction;
         
         helper.onclick = async () => {
-            const url = await getWalletRedirectUrl();
-            WebApp.openLink(url, { try_instant_view: false });
+            const url = await getBestRedirectUrl();
+            if (url) WebApp.openLink(url, { try_instant_view: false });
         };
 
         statusInfo.classList.add('pulse');
