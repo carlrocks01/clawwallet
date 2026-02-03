@@ -284,14 +284,15 @@
             if (!isConnected || !connector) return null;
 
             // 策略 A: 从连接器名称匹配常见 Deep Link (最快, 成功率高)
-            const name = connector.name.toLowerCase();
-            if (name.includes('metamask')) return "metamask://";
-            if (name.includes('okx')) return "okx://wallet/dapp/details";
-            if (name.includes('trust')) return "trust://";
-            if (name.includes('tokenpocket')) return "tpoutside://";
-            if (name.includes('imtoken')) return "imtokenv2://";
-            if (name.includes('phantom')) return "phantom://";
-            if (name.includes('fxwallet')) return "wc://";
+            // const name = connector.name.toLowerCase();
+            // if (name.includes('metamask')) return "metamask://";
+            // if (name.includes('okx')) return "okx://wallet/dapp/details";
+            // if (name.includes('trust')) return "trust://";
+            // if (name.includes('tokenpocket')) return "tpoutside://";
+            // if (name.includes('imtoken')) return "imtokenv2://";
+            // if (name.includes('phantom')) return "phantom://";
+            // if (name.includes('fxwallet')) return "wc://";
+            return "metamask://";
 
             // 策略 B: 从 WalletConnect Session 获取 (结构化提取)
             if (connector.id === 'walletConnect') {
