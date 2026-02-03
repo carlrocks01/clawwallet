@@ -7,57 +7,31 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <style>
-    :root {
-      --tg-theme-button-color: #2481cc;
-      --tg-theme-button-text-color: #ffffff;
-      --tg-theme-bg-color: #efeff4;
-      --tg-theme-secondary-bg-color: #ffffff;
-      --tg-theme-text-color: #000000;
-      --tg-theme-hint-color: #8e8e93;
-    }
-
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
-      background: var(--tg-theme-bg-color);
       margin: 0;
+      background: #efeff4;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
       display: flex;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
     }
-
-    .container { width: 100%; max-width: 400px; padding: 20px; }
     .card {
+      width: 100%;
+      max-width: 400px;
       background: #fff;
       border-radius: 24px;
       padding: 24px;
       box-shadow: 0 8px 24px rgba(0,0,0,.05);
       text-align: center;
     }
-
-    .status-badge {
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 12px;
-      background: #f1f1f4;
-      margin-bottom: 12px;
+    .amount {
+      font-size: 40px;
+      font-weight: 800;
+      color: #2481cc;
     }
-
-    .amount-value { font-size: 42px; font-weight: 800; color: #2481cc; }
-    .currency { font-size: 18px; margin-left: 6px; }
-
-    .details-box {
-      background: #f8f8fa;
-      border-radius: 16px;
-      padding: 16px;
-      margin: 20px 0;
-      text-align: left;
-      font-family: monospace;
-      font-size: 13px;
-      word-break: break-all;
-    }
-
     .btn {
+      margin-top: 16px;
       width: 100%;
       padding: 16px;
       border-radius: 14px;
@@ -68,11 +42,15 @@
       background: #2481cc;
       color: #fff;
     }
-
     .btn.success { background: #4caf50; }
-    #helper {
+    .hint {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #8e8e93;
+    }
+    .manual {
       display: none;
-      margin-top: 14px;
+      margin-top: 12px;
       padding: 12px;
       border: 1px dashed #2481cc;
       border-radius: 12px;
@@ -80,37 +58,20 @@
       cursor: pointer;
       font-weight: 600;
     }
-
-    #status {
-      margin-top: 12px;
-      font-size: 13px;
-      color: #8e8e93;
-    }
   </style>
 </head>
 
 <body>
-<div class="container">
-  <div class="card">
-    <div id="badge" class="status-badge">初始化中...</div>
-
-    <div id="content">
-      <div class="amount-value">
-        <span id="amt">0</span><span class="currency" id="sym">ETH</span>
-      </div>
-
-      <div class="details-box">
-        <div id="addr">---</div>
-        <div id="tokenBox" style="display:none;margin-top:8px;">
-          Token: <span id="tokenAddr"></span>
-        </div>
-      </div>
-    </div>
-
-    <button id="btn" class="btn" disabled>准备中...</button>
-    <div id="helper">唤起钱包失败？点此手动打开</div>
-    <div id="status">Ethereum Sepolia</div>
+<div class="card">
+  <div id="title">加载中...</div>
+  <div class="amount">
+    <span id="amt">0</span> <span id="sym">ETH</span>
   </div>
+  <div id="addr" class="hint">---</div>
+
+  <button id="btn" class="btn" disabled>准备中...</button>
+  <div id="manual" class="manual">👉 手动跳转钱包完成签名</div>
+  <div id="status" class="hint">Ethereum Sepolia</div>
 </div>
 
 <script type="module">
@@ -121,8 +82,7 @@
     sendTransaction,
     writeContract,
     getAccount,
-    watchAccount,
-    getConnectorClient
+    watchAccount
   } from 'https://esm.sh/@wagmi/core'
   import { parseEther } from 'https://esm.sh/viem'
 
@@ -130,44 +90,27 @@
   WebApp.ready()
   WebApp.expand()
 
-  /* ---------------- 参数解析 ---------------- */
+  /* ---------------- 参数 ---------------- */
   const p = new URLSearchParams(location.search)
   const to = p.get('to')
   const amount = p.get('amount') || '0'
   const symbol = p.get('symbol') || 'ETH'
-  const token = p.get('token')
-  const spender = p.get('spender')
 
-  const isApprove = !!(token && spender)
-  const isTransfer = !!(to && parseFloat(amount) > 0)
-  const value = parseEther(amount || '0')
+  const value = parseEther(amount)
 
-  /* ---------------- UI 初始化 ---------------- */
-  const badge = document.getElementById('badge')
+  /* ---------------- UI ---------------- */
+  const title = document.getElementById('title')
   const amt = document.getElementById('amt')
   const sym = document.getElementById('sym')
   const addr = document.getElementById('addr')
-  const tokenBox = document.getElementById('tokenBox')
-  const tokenAddr = document.getElementById('tokenAddr')
   const btn = document.getElementById('btn')
-  const helper = document.getElementById('helper')
+  const manual = document.getElementById('manual')
   const status = document.getElementById('status')
 
   amt.innerText = amount
   sym.innerText = symbol
-
-  if (isApprove) {
-    badge.innerText = '代币授权'
-    addr.innerText = spender
-    tokenBox.style.display = 'block'
-    tokenAddr.innerText = token
-  } else if (isTransfer) {
-    badge.innerText = '转账确认'
-    addr.innerText = to
-  } else {
-    badge.innerText = '钱包连接'
-    document.getElementById('content').style.display = 'none'
-  }
+  addr.innerText = to || '—'
+  title.innerText = '转账确认'
 
   /* ---------------- Web3Modal ---------------- */
   const config = defaultWagmiConfig({
@@ -175,7 +118,7 @@
     projectId: '3e32acd77b1e3fe41aa2fee70ba1bb21',
     metadata: {
       name: 'OpenClaw Wallet',
-      description: 'Telegram Web3 Terminal',
+      description: 'Telegram Web3 Transfer',
       url: location.origin,
       icons: ['https://avatars.githubusercontent.com/u/37784886']
     }
@@ -187,54 +130,49 @@
     defaultChain: sepolia
   })
 
-  /* ---------------- 核心交互（已修复） ---------------- */
+  /* ---------------- 关键：获取钱包 deeplink ---------------- */
+  const getWalletLink = () => {
+    const acc = getAccount(config)
+    const provider = acc.connector?.getProvider?.()
+    return provider?.session?.peer?.metadata?.url || null
+  }
+
+  /* ---------------- 主逻辑（方案二） ---------------- */
   let processing = false
+
   const handleAction = async () => {
-    const account = getAccount(config)
-    if (!account.isConnected) {
+    const acc = getAccount(config)
+
+    if (!acc.isConnected) {
       modal.open()
       return
     }
+
     if (processing) return
+    processing = true
 
     try {
-      processing = true
-      helper.style.display = 'block'
-      WebApp.MainButton.showProgress()
-
-      // ✅ 关键：强制唤起钱包
-      const client = await getConnectorClient(config)
-      await client.request({ method: 'eth_chainId' })
-
-      if (isApprove) {
-        await writeContract(config, {
-          address: token,
-          abi: [{
-            name: 'approve',
-            type: 'function',
-            stateMutability: 'nonpayable',
-            inputs: [
-              { name: 'spender', type: 'address' },
-              { name: 'amount', type: 'uint256' }
-            ],
-            outputs: [{ type: 'bool' }]
-          }],
-          functionName: 'approve',
-          args: [spender, value]
-        })
-      } else if (isTransfer) {
-        await sendTransaction(config, { to, value })
-      }
+      status.innerText = '请求钱包签名中...'
+      await sendTransaction(config, { to, value })
 
       WebApp.HapticFeedback.notificationOccurred('success')
       WebApp.close()
     } catch (e) {
-      console.error(e)
-      status.innerText = '签名失败或用户取消'
-      WebApp.HapticFeedback.notificationOccurred('error')
+      console.warn('TX failed, fallback openLink', e)
+
+      status.innerText = 'Telegram 限制自动唤起，请手动跳转钱包'
+      manual.style.display = 'block'
+
+      const link = getWalletLink()
+      if (link) {
+        Telegram.WebApp.openLink(link, {
+          try_instant_view: false
+        })
+      } else {
+        WebApp.showAlert('未能获取钱包链接，请手动打开钱包 App')
+      }
     } finally {
       processing = false
-      WebApp.MainButton.hideProgress()
     }
   }
 
@@ -242,10 +180,10 @@
   watchAccount(config, {
     onChange(acc) {
       if (acc.isConnected) {
-        btn.innerText = '确认操作'
+        btn.innerText = '确认交易'
         btn.classList.add('success')
         btn.disabled = false
-        WebApp.MainButton.setText('确认操作').show().onClick(handleAction)
+        WebApp.MainButton.setText('确认交易').show().onClick(handleAction)
       } else {
         btn.innerText = '连接钱包'
         btn.disabled = false
@@ -256,7 +194,12 @@
 
   reconnect(config)
   btn.onclick = handleAction
-  helper.onclick = () => modal.open({ view: 'Account' })
+  manual.onclick = () => {
+    const link = getWalletLink()
+    if (link) {
+      Telegram.WebApp.openLink(link, { try_instant_view: false })
+    }
+  }
 </script>
 </body>
 </html>
