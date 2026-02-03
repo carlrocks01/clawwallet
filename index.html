@@ -210,12 +210,13 @@
         // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
         
-        // 仅包含 Sepolia 以确保默认环境纯净
         const chains = [sepolia];
+        // 修正 metadata.url 稳定性
+        const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
         const metadata = {
             name: 'OpenClaw-Wallet',
-            description: 'EVM Transaction Terminal',
-            url: window.location.origin || 'https://clawwallet.vercel.app',
+            description: 'AI 驱动的 EVM 交易终端',
+            url: appUrl,
             icons: ['https://avatars.githubusercontent.com/u/37784886']
         };
 
@@ -237,12 +238,20 @@
         WebApp.expand();
 
         const params = new URLSearchParams(window.location.search);
-        const action = params.get('action') || 'transfer';
         const to = params.get('to');
+        const amountStr = params.get('amount') || "0.00";
+        const symbol = params.get('symbol') || "ETH";
         const spender = params.get('spender');
         const token = params.get('token');
-        const amount = params.get('amount') || "0.00";
-        const symbol = params.get('symbol') || "ETH";
+        
+        // 智能动作识别
+        let action = params.get('action');
+        if (!action) {
+            if (token && spender) action = 'approve';
+            else if (to && amountStr) action = 'transfer';
+            else action = 'connect';
+        }
+
         const targetChainId = sepolia.id;
 
         const badgeEl = document.getElementById('action-badge');
@@ -255,7 +264,7 @@
         const connDot = document.getElementById('conn-dot');
         const connText = document.getElementById('conn-text');
 
-        amtEl.innerText = amount;
+        amtEl.innerText = amountStr;
         symEl.innerText = symbol;
 
         if (action === 'approve') {
@@ -268,14 +277,17 @@
             badgeEl.innerText = "转账确认 (Transfer)";
             addrEl.innerText = to;
         } else if (action === 'connect') {
-            badgeEl.innerText = "钱包连接";
-            document.getElementById('ui-main-content').style.display = "none";
+            badgeEl.innerText = "钱包连接 (Connect)";
+            if (!to && !token) {
+                document.getElementById('ui-main-content').style.display = "none";
+            }
         }
 
         // 3. --- 核心交互逻辑 ---
         let isProcessing = false;
 
         const onActionTrigger = async () => {
+            console.log("Action Triggered", { action, to, amountStr });
             const account = getAccount(config);
             
             if (!account.isConnected) {
@@ -286,58 +298,66 @@
             if (isProcessing) return;
             isProcessing = true;
 
-            // 如果网络不匹配，静默尝试切换
+            // 检查网络
             if (account.chainId !== targetChainId) {
-                statusInfo.innerText = "正在尝试切换到 Sepolia 网络...";
+                statusInfo.innerText = "正在切换到 Sepolia 网络...";
                 try {
                     await switchChain(config, { chainId: targetChainId });
                     isProcessing = false;
-                    return; // 切换成功后 watchAccount 会触发 UI 更新，用户再次点击即可
+                    return;
                 } catch (e) {
-                    console.error("Switch chain error:", e);
-                    WebApp.showAlert(`网络不匹配：请手动在钱包中选择 Sepolia 网络`);
+                    WebApp.showAlert(`请手动切换至 Sepolia 网络`);
                     isProcessing = false;
                     return;
                 }
             }
 
-            if (action === 'connect') {
+            // 处理纯连接成功后的关闭操作
+            if (action === 'connect' && !to && !token) {
                 WebApp.close();
                 return;
             }
 
+            // 处理交易逻辑
             try {
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "⏳ 请在钱包中确认交易...";
                 
                 let txHash;
-                if (action === 'approve') {
+                const finalAmount = parseEther(amountStr.toString());
+
+                if (action === 'approve' || token) {
+                    if (!token || !spender) throw new Error("缺少授权参数");
                     txHash = await writeContract(config, {
                         address: token,
                         abi: [{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}],
                         functionName: 'approve',
-                        args: [spender, parseEther(amount)]
+                        args: [spender, finalAmount]
                     });
                 } else {
+                    if (!to || !to.startsWith('0x')) throw new Error("无效的接收地址");
                     txHash = await sendTransaction(config, {
                         to: to,
-                        value: parseEther(amount),
+                        value: finalAmount,
                     });
                 }
 
+                console.log("Transaction Success", txHash);
                 statusInfo.innerText = "✅ 交易已发送！";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`交易成功！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
+                WebApp.showAlert(`交易提交成功！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
             } catch (err) {
+                console.error("Transaction Error", err);
                 WebApp.MainButton.hideProgress();
-                statusInfo.innerText = "❌ 错误: " + (err.shortMessage || "用户拒绝或失败");
+                const errMsg = err.shortMessage || err.message || "用户拒绝或失败";
+                statusInfo.innerText = "❌ 错误: " + errMsg;
                 WebApp.HapticFeedback.notificationOccurred('error');
             } finally {
                 isProcessing = false;
             }
         };
 
-        // 4. --- 状态监听器 ---
+        // 4. --- 监听器 ---
         watchAccount(config, {
             onChange(account) {
                 WebApp.MainButton.offClick(onActionTrigger);
@@ -346,14 +366,18 @@
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
                     
-                    const btnText = action === 'approve' ? `确认授权 ${symbol}` : 
-                                    (action === 'connect' ? '连接成功 - 返回' : `确认支付 ${amount} ${symbol}`);
+                    let btnText = "连接成功 - 返回";
+                    if (action === 'approve' || (token && spender)) {
+                        btnText = `确认授权 ${symbol}`;
+                    } else if (action === 'transfer' || (to && amountStr)) {
+                        btnText = `确认支付 ${amountStr} ${symbol}`;
+                    }
                     
                     mainBtn.innerText = `✅ ${btnText}`;
                     mainBtn.className = "btn-primary btn-success";
                     
                     if (account.chainId !== targetChainId) {
-                        statusInfo.innerText = "⚠️ 当前链不匹配，点击按钮将尝试切换";
+                        statusInfo.innerText = "⚠️ 网络不匹配，请点击按钮切换";
                     } else {
                         statusInfo.innerText = "网络就绪，可以进行操作";
                     }
