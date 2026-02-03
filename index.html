@@ -215,7 +215,7 @@
             <!-- 主交互按钮 -->
             <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
             
-            <div id="wallet-helper">没反应？点此重试唤起</div>
+            <div id="wallet-helper">没反应？点此手动打开钱包 App</div>
             <div id="status-info">网络: Ethereum Sepolia</div>
         </div>
     </div>
@@ -233,7 +233,7 @@
         
         const metadata = {
             name: 'OpenClaw-Wallet',
-            description: 'AI EVM交易钱包',
+            description: 'AI EVM 交易终端',
             url: appUrl,
             icons: ['https://avatars.githubusercontent.com/u/37784886']
         };
@@ -248,7 +248,8 @@
             themeMode: 'light'
         });
         
-        try { reconnect(config); } catch (e) {}
+        // 预连接
+        reconnect(config).catch(() => {});
 
         // 2. --- 参数与 UI 初始化 ---
         const WebApp = window.Telegram.WebApp;
@@ -263,7 +264,7 @@
         const token = params.get('token');
         const targetChainId = sepolia.id;
 
-        // 核心动作识别逻辑
+        // 核心动作识别
         const isApprove = !!(token && spender);
         const isTransfer = !!(toAddress && amountStr && amountStr !== "0.00");
         let actionType = params.get('action') || 'connect';
@@ -303,6 +304,8 @@
 
         const handleBlockchainAction = async () => {
             const account = getAccount(config);
+            
+            // 如果没连接，先打开连接框
             if (!account.isConnected) {
                 modal.open();
                 return;
@@ -310,13 +313,13 @@
 
             if (isProcessing) return;
 
-            // 第一优先级：网络切换 (必须是独立点击)
+            // 检查网络：网络不匹配时必须独立触发，不能和交易连在一起，否则浏览器会拦截跳转
             if (account.chainId !== targetChainId) {
                 isProcessing = true;
-                statusInfo.innerText = "请确认切换至 Sepolia 网络...";
+                statusInfo.innerText = "正在切换网络...";
                 try {
                     await switchChain(config, { chainId: targetChainId });
-                    statusInfo.innerText = "网络切换成功，请再次点击确认支付";
+                    statusInfo.innerText = "网络切换成功，请再次点击按钮进行转账";
                 } catch (e) {
                     WebApp.showAlert(`切换失败，请手动在钱包中选择 Sepolia 网络`);
                 } finally {
@@ -325,18 +328,18 @@
                 return;
             }
 
-            // 第二优先级：纯连接返回
+            // 纯连接返回
             if (actionType === 'connect' && !isTransfer && !isApprove) {
                 WebApp.close();
                 return;
             }
 
-            // 第三优先级：执行交易
+            // 执行转账/授权
             try {
                 isProcessing = true;
                 WebApp.MainButton.showProgress();
-                statusInfo.innerText = "⏳ 正在唤起钱包进行签名...";
-                walletHelper.style.display = "block";
+                statusInfo.innerText = "正在唤起钱包确认...";
+                walletHelper.style.display = "block"; // 显示手动唤起链接
 
                 let txHash;
                 const finalAmount = parseEther(amountStr.toString().replace(/[^0-9.]/g, ''));
@@ -355,14 +358,14 @@
                     });
                 }
 
-                statusInfo.innerText = "✅ 交易发送成功！";
+                statusInfo.innerText = "交易已提交，等待上链...";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`交易已成功提交！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
+                WebApp.showAlert(`转账成功提交！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
             } catch (err) {
                 console.error(err);
                 WebApp.MainButton.hideProgress();
-                const errMsg = err.shortMessage || "用户拒绝或签名失败";
-                statusInfo.innerText = "❌ 错误: " + errMsg;
+                const errMsg = err.shortMessage || "用户取消或环境不支持跳转";
+                statusInfo.innerText = "❌ 失败: " + errMsg;
                 WebApp.HapticFeedback.notificationOccurred('error');
             } finally {
                 isProcessing = false;
@@ -380,20 +383,18 @@
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
                     
                     if (account.chainId !== targetChainId) {
-                        // 强制先显示切换按钮
                         mainBtn.innerText = "🔄 切换至 Sepolia 网络";
                         mainBtn.className = "btn-primary btn-warning";
                         statusInfo.innerText = "网络不匹配，请先点击切换";
                         WebApp.MainButton.setText("切换网络").show().onClick(handleBlockchainAction);
                     } else {
-                        // 网络正确，显示交易按钮
                         let btnText = "连接成功 - 返回";
                         if (isApprove) btnText = `确认授权 ${symbol}`;
-                        else if (isTransfer) btnText = `确认支付 ${amountStr} ${symbol}`;
+                        else if (isTransfer) btnText = `确认转账 ${amountStr} ${symbol}`;
                         
                         mainBtn.innerText = `✅ ${btnText}`;
                         mainBtn.className = "btn-primary btn-success";
-                        statusInfo.innerText = "准备就绪，点击上方或底部按钮支付";
+                        statusInfo.innerText = "环境就绪，点击按钮发起签名";
                         WebApp.MainButton.setText(btnText).show().onClick(handleBlockchainAction);
                     }
                 } else {
@@ -408,7 +409,12 @@
         });
 
         mainBtn.onclick = handleBlockchainAction;
-        walletHelper.onclick = () => modal.open();
+        
+        // 手动唤起逻辑：通过直接调用 open 强制让 Web3Modal 尝试与已配对的钱包握手
+        walletHelper.onclick = () => {
+            modal.open();
+        };
+
         statusInfo.classList.add('pulse');
     </script>
 </body>
