@@ -202,7 +202,7 @@
 
                 <div class="details-box">
                     <div class="detail-item">
-                        <div id="target-label" class="detail-label">目标地址</div>
+                        <div id="target-label" class="detail-label">接收地址</div>
                         <div id="addr" class="detail-value">正在解析...</div>
                     </div>
                     <div id="token-box" class="detail-item" style="display:none;">
@@ -215,7 +215,7 @@
             <!-- 主交互按钮 -->
             <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
             
-            <div id="wallet-helper">唤起失败？点此尝试重新打开钱包</div>
+            <div id="wallet-helper">没反应？点此尝试重新唤醒钱包</div>
             <div id="status-info">网络: Ethereum Sepolia</div>
         </div>
     </div>
@@ -229,7 +229,6 @@
         // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
         const chains = [sepolia];
-        // 修正 metadata 链接，帮助钱包识别跳转来源
         const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
         
         const metadata = {
@@ -249,8 +248,7 @@
             themeMode: 'light'
         });
         
-        // 自动尝试重连旧会话
-        reconnect(config).catch(() => {});
+        try { reconnect(config); } catch (e) {}
 
         // 2. --- 业务参数解析 ---
         const WebApp = window.Telegram.WebApp;
@@ -265,12 +263,14 @@
         const token = params.get('token');
         const targetChainId = sepolia.id;
 
-        // 识别业务类型
+        // 强化的动作识别：只要检测到核心转账或授权参数，就强制设定 actionType
         const isApprove = !!(token && spender);
         const isTransfer = !!(toAddress && amountStr && amountStr !== "0.00");
-        let actionType = params.get('action') || 'connect';
+        let actionType = params.get('action');
+
         if (isApprove) actionType = 'approve';
         else if (isTransfer) actionType = 'transfer';
+        else if (!actionType) actionType = 'connect';
 
         const badgeEl = document.getElementById('action-badge');
         const amtEl = document.getElementById('amt');
@@ -286,18 +286,20 @@
         amtEl.innerText = amountStr;
         symEl.innerText = symbol;
 
-        if (isApprove) {
+        if (actionType === 'approve') {
             badgeEl.innerText = "代币授权 (Approve)";
             addrEl.innerText = spender;
             document.getElementById('target-label').innerText = "授权给";
             tokenBox.style.display = "block";
             document.getElementById('token-addr').innerText = token;
-        } else if (isTransfer) {
+        } else if (actionType === 'transfer') {
             badgeEl.innerText = "转账确认 (Transfer)";
             addrEl.innerText = toAddress;
         } else {
             badgeEl.innerText = "钱包连接 (Connect)";
-            document.getElementById('ui-main-content').style.display = "none";
+            if (!isTransfer && !isApprove) {
+                document.getElementById('ui-main-content').style.display = "none";
+            }
         }
 
         // 3. --- 核心执行逻辑 ---
@@ -306,7 +308,7 @@
         const handleBlockchainAction = async () => {
             const account = getAccount(config);
             
-            // 未连接时，优先唤起连接选择器
+            // 场景 1：未连接时调用 modal 唤起
             if (!account.isConnected) {
                 modal.open();
                 return;
@@ -314,7 +316,7 @@
 
             if (isProcessing) return;
 
-            // 检查网络：若不匹配，必须先引导切换（防止因异步链式调用丢失用户手势）
+            // 检查网络：网络不匹配时必须由用户显式点击 switchChain 唤起
             if (account.chainId !== targetChainId) {
                 isProcessing = true;
                 statusInfo.innerText = "请确认切换至 Sepolia 网络...";
@@ -329,25 +331,25 @@
                 return;
             }
 
-            // 处理纯连接成功后的返回
+            // 场景 2：纯连接成功的返回
             if (actionType === 'connect' && !isTransfer && !isApprove) {
                 WebApp.close();
                 return;
             }
 
-            // 执行核心转账或授权
+            // 场景 3：执行核心转账或授权
             try {
                 isProcessing = true;
                 WebApp.MainButton.showProgress();
-                statusInfo.innerText = "⏳ 正在唤起钱包确认转账...";
-                walletHelper.style.display = "block"; // 提供备用唤起方案
+                statusInfo.innerText = "正在唤起钱包进行签名...";
+                walletHelper.style.display = "block"; 
 
-                let txHash;
-                // 提前清理并计算数值，确保点击后的逻辑尽可能同步执行
+                // 强制同步计算金额，减少异步延迟导致的跳转拦截
                 const cleanAmountStr = amountStr.toString().replace(/[^0-9.]/g, '');
                 const finalAmount = parseEther(cleanAmountStr || "0");
 
-                if (isApprove) {
+                let txHash;
+                if (actionType === 'approve') {
                     txHash = await writeContract(config, {
                         address: token,
                         abi: [{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}],
@@ -361,14 +363,18 @@
                     });
                 }
 
-                statusInfo.innerText = "✅ 转账已提交！";
+                statusInfo.innerText = "✅ 交易已提交！";
                 WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`转账申请已提交！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
+                WebApp.showAlert(`转账成功提交！\n哈希: ${txHash.slice(0,12)}...`, () => WebApp.close());
             } catch (err) {
                 console.error("Transaction Error:", err);
                 WebApp.MainButton.hideProgress();
-                const errMsg = err.shortMessage || "用户取消或钱包未响应";
+                const errMsg = err.shortMessage || "用户取消或环境不支持跳转";
                 statusInfo.innerText = "❌ 转账失败: " + errMsg;
+                // 如果是特定环境导致没反应，提示用户使用 modal 重新尝试
+                if (errMsg.includes("rejected") === false) {
+                    modal.open();
+                }
                 WebApp.HapticFeedback.notificationOccurred('error');
             } finally {
                 isProcessing = false;
@@ -376,7 +382,7 @@
             }
         };
 
-        // 4. --- UI 状态监控与按钮同步 ---
+        // 4. --- 监听器 ---
         watchAccount(config, {
             onChange(account) {
                 WebApp.MainButton.offClick(handleBlockchainAction);
@@ -391,13 +397,14 @@
                         statusInfo.innerText = "网络不匹配，请先点击切换";
                         WebApp.MainButton.setText("切换网络").show().onClick(handleBlockchainAction);
                     } else {
+                        // 根据 actionType 锁定按钮文案
                         let btnText = "连接成功 - 返回";
-                        if (isApprove) btnText = `确认授权 ${symbol}`;
-                        else if (isTransfer) btnText = `确认转账 ${amountStr} ${symbol}`;
+                        if (actionType === 'approve') btnText = `确认授权 ${symbol}`;
+                        else if (actionType === 'transfer') btnText = `确认转账 ${amountStr} ${symbol}`;
                         
                         mainBtn.innerText = `✅ ${btnText}`;
                         mainBtn.className = "btn-primary btn-success";
-                        statusInfo.innerText = "准备就绪，点击按钮发起转账";
+                        statusInfo.innerText = "环境就绪，点击按钮发起转账";
                         WebApp.MainButton.setText(btnText).show().onClick(handleBlockchainAction);
                     }
                 } else {
@@ -413,7 +420,9 @@
 
         mainBtn.onclick = handleBlockchainAction;
         
-        // 手动唤起逻辑：如果自动跳转失败，点击此处会通过 modal.open 强制让已连接的钱包重现弹窗
+        // 当用户点击“手动唤起”时，显式调用 modal.open()
+        // 这一步非常关键：由于钱包已经连接，modal.open() 通常会显示当前账户视图，
+        // 在该视图中点击任意位置或重新选择，往往能重新激活与 App 的 Deep Link 通讯。
         walletHelper.onclick = () => {
             modal.open();
         };
