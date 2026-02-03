@@ -285,18 +285,18 @@
         // 3. --- 动态获取钱包重定向路径 (实现多钱包兼容) ---
         const getWalletRedirectUrl = async () => {
             const { connector } = getAccount(config);
-            if (!connector) return "https://metamask.app.link/"; // 默认兜底
+            // if (!connector) return "https://metamask.app.link/"; // 默认兜底
 
-            // 策略 A: 尝试获取当前 Session 的重定向元数据
-            try {
-                const provider = await connector.getProvider();
-                const session = provider?.session;
-                const redirect = session?.peer?.metadata?.redirect;
-                const url = redirect?.native || redirect?.universal;
-                if (url) return url;
-            } catch (e) {
-                console.warn("无法从 Session 获取重定向 URL");
-            }
+            // // 策略 A: 尝试获取当前 Session 的重定向元数据
+            // try {
+            //     const provider = await connector.getProvider();
+            //     const session = provider?.session;
+            //     const redirect = session?.peer?.metadata?.redirect;
+            //     const url = redirect?.native || redirect?.universal;
+            //     if (url) return url;
+            // } catch (e) {
+            //     console.warn("无法从 Session 获取重定向 URL");
+            // }
 
             // 策略 B: 根据钱包名称映射常见路径
             const name = connector.name.toLowerCase();
