@@ -210,7 +210,6 @@
 
             <button class="btn-primary" id="main-btn" disabled>⌛ 正在准备...</button>
             
-            <!-- 关键改进：关联原生 openLink 的辅助按钮 -->
             <div id="wallet-helper">唤起失败？点此手动跳转钱包 App</div>
             
             <div id="status-info">网络环境: Ethereum Sepolia</div>
@@ -223,7 +222,7 @@
         import { reconnect, sendTransaction, writeContract, getAccount, watchAccount } from 'https://esm.sh/@wagmi/core'
         import { parseEther } from 'https://esm.sh/viem'
 
-        // 1. --- 立即解析参数 (解决 UI 滞后问题) ---
+        // 1. --- 立即解析参数 ---
         const params = new URLSearchParams(window.location.search);
         const toAddress = params.get('to');
         const amountStr = (params.get('amount') || "0.00").toString().replace(/[^0-9.]/g, '');
@@ -231,12 +230,12 @@
         const spender = params.get('spender');
         const token = params.get('token');
 
-        // 核心动作识别：只要检测到核心转账或授权参数，就强制设定 actionType
+        // 核心动作识别逻辑
         const isApprove = !!(token && spender);
         const isTransfer = !!(toAddress && parseFloat(amountStr) > 0);
         let actionType = isApprove ? 'approve' : (isTransfer ? 'transfer' : 'connect');
 
-        // 预计算，减少点击时的异步消耗
+        // 预计算金额
         let precomputedValue = 0n;
         try { precomputedValue = parseEther(amountStr || "0"); } catch(e) {}
 
@@ -294,12 +293,32 @@
 
         let isProcessing = false;
 
-        // 辅助方法：使用原生方式“强力”唤起钱包
-        const forceWakeUpWallet = () => {
-            // MetaMask 官方通用链接，打开它通常能激活已建立的 WalletConnect 会话并弹窗
-            // 这里可以根据情况扩展为各个钱包的 Universal Link
-            const universalLink = "https://metamask.app.link/"; 
-            WebApp.openLink(universalLink, { try_instant_view: false });
+        // 动态获取当前钱包的唤起链接
+        const getWalletRedirectUrl = async () => {
+            const { connector } = getAccount(config);
+            if (connector?.id === 'walletConnect') {
+                try {
+                    const provider = await connector.getProvider();
+                    // 尝试从 WalletConnect 会话中提取钱包提供的重定向元数据
+                    const redirect = provider?.session?.peer?.metadata?.redirect;
+                    return redirect?.native || redirect?.universal || null;
+                } catch (e) {
+                    console.warn("Failed to get redirect info", e);
+                }
+            }
+            return null;
+        };
+
+        // 强力唤起函数
+        const forceWakeUpWallet = async () => {
+            const url = await getWalletRedirectUrl();
+            if (url) {
+                console.log("Waking up wallet with link:", url);
+                WebApp.openLink(url, { try_instant_view: false });
+            } else {
+                // 如果没有获取到特定钱包链接，则回退到 Account 视图
+                modal.open({ view: 'Account' });
+            }
         };
 
         const handleBlockchainAction = async () => {
@@ -322,11 +341,9 @@
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包签名交易...";
                 
-                // 立即显示手动唤醒链接
                 helper.style.display = "block";
 
-                // 尝试原生唤起一次（针对某些无法自动跳转的环境）
-                // Uniswap 也会在发起交易的同时发出一个跳转信号
+                // 【核心优化点】在发起交易的同时，动态获取钱包路径并尝试 openLink 强推
                 forceWakeUpWallet();
 
                 let txHash;
@@ -354,7 +371,6 @@
                 const shortErr = err.shortMessage || err.message || "";
                 statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户拒绝" : "签名超时或环境拦截");
                 
-                // 如果是环境问题，再次打开 Account 视图作为补救
                 if (!shortErr.includes("rejected")) {
                     modal.open({ view: 'Account' });
                 }
@@ -376,10 +392,10 @@
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...`;
                     
-                    // 按钮文本锁定
+                    // 文案锁定逻辑
                     let btnT = "连接成功 - 返回";
-                    if (isApprove) btnT = `确认授权 ${symbol}`;
-                    else if (isTransfer) btnT = `确认转账 ${amountStr} ${symbol}`;
+                    if (isApprove) btnT = "确认授权";
+                    else if (isTransfer) btnT = "确认转账";
                     
                     mainBtn.innerText = "✅ " + btnT;
                     mainBtn.className = "btn-primary btn-success";
@@ -400,8 +416,6 @@
 
         reconnect(config).catch(() => {});
         mainBtn.onclick = handleBlockchainAction;
-        
-        // 绑定你建议的方法
         helper.onclick = () => forceWakeUpWallet();
 
         statusInfo.classList.add('pulse');
