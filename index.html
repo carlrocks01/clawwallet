@@ -3,105 +3,322 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ClawWallet - EVM 签名</title>
+    <title>ClawWallet 支付确认</title>
+    <!-- Telegram 官方 WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"></script>
-    
     <style>
-        :root { --tg-theme-button-color: #2481cc; }
-        body { font-family: -apple-system, system-ui, sans-serif; background: #f4f4f7; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 24px; border-radius: 16px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-        .amount-box { background: #f8f9fb; padding: 15px; border-radius: 12px; margin: 20px 0; }
-        .amount { font-size: 28px; font-weight: bold; color: var(--tg-theme-button-color); }
-        .address { font-size: 12px; color: #888; word-break: break-all; margin-top: 8px; }
-        .btn { background: var(--tg-theme-button-color); color: white; border: none; padding: 14px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; }
-        #status { margin-top: 15px; font-size: 13px; color: #666; }
-        w3m-button { display: flex; justify-content: center; margin-bottom: 15px; }
+        :root {
+            --tg-theme-button-color: #2481cc;
+            --tg-theme-button-text-color: #ffffff;
+            --tg-theme-bg-color: #efeff4;
+            --tg-theme-secondary-bg-color: #ffffff;
+            --tg-theme-text-color: #000000;
+            --tg-theme-hint-color: #8e8e93;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 400px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .card {
+            background-color: var(--tg-theme-secondary-bg-color);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            text-align: center;
+        }
+
+        .header {
+            margin-bottom: 24px;
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+            color: var(--tg-theme-text-color);
+        }
+
+        .amount-container {
+            margin: 24px 0;
+        }
+
+        .amount-label {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color);
+            margin-bottom: 8px;
+        }
+
+        .amount-value {
+            font-size: 42px;
+            font-weight: 800;
+            color: var(--tg-theme-button-color);
+            margin: 0;
+        }
+
+        .currency {
+            font-size: 18px;
+            font-weight: 600;
+            margin-left: 4px;
+        }
+
+        .details-box {
+            background-color: #f1f1f4;
+            border-radius: 12px;
+            padding: 16px;
+            text-align: left;
+            margin-bottom: 24px;
+        }
+
+        .detail-item {
+            margin-bottom: 12px;
+        }
+
+        .detail-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-label {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .detail-value {
+            font-size: 14px;
+            font-family: 'SF Mono', 'Roboto Mono', monospace;
+            word-break: break-all;
+            color: var(--tg-theme-text-color);
+            line-height: 1.4;
+        }
+
+        .action-button {
+            background-color: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            border: none;
+            padding: 16px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            width: 100%;
+            cursor: pointer;
+            transition: transform 0.1s ease, opacity 0.2s ease;
+            box-shadow: 0 4px 12px rgba(36, 129, 204, 0.2);
+        }
+
+        .action-button:active {
+            transform: scale(0.98);
+            opacity: 0.9;
+        }
+
+        .action-button:disabled {
+            background-color: #ccc;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        #status-text {
+            margin-top: 16px;
+            font-size: 13px;
+            color: var(--tg-theme-hint-color);
+        }
+
+        .pulse {
+            animation: pulse-animation 2s infinite;
+        }
+
+        @keyframes pulse-animation {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h2 style="margin:0">确认付款</h2>
-    <div class="amount-box">
-        <div class="amount" id="displayAmount">0.00</div>
-        <div id="displaySymbol" style="font-size:14px; color:#666;">ETH / FX</div>
-        <div class="address" id="displayTo">正在加载地址...</div>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1 class="title">确认交易</h1>
+            </div>
+
+            <div class="amount-container">
+                <div class="amount-label">支付金额</div>
+                <div class="amount-value">
+                    <span id="display-amount">0.00</span><span class="currency" id="display-currency">ETH</span>
+                </div>
+            </div>
+
+            <div class="details-box">
+                <div class="detail-item">
+                    <div class="detail-label">接收地址</div>
+                    <div class="detail-value" id="display-to">正在解析地址...</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">网络环境</div>
+                    <div class="detail-value" id="display-network">Base Sepolia (Testnet)</div>
+                </div>
+            </div>
+
+            <button class="action-button" id="main-action-btn">🔗 连接钱包</button>
+            
+            <div id="status-text">请连接支持 EVM 的钱包以继续</div>
+        </div>
     </div>
 
-    <div id="connect-root">
-        <w3m-button></w3m-button>
-    </div>
+    <!-- 核心逻辑脚本 -->
+    <script type="module">
+        // 使用具体的版本号确保稳定性，并从 viem 导入 parseEther
+        import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
+        import { mainnet, base, baseSepolia } from 'https://esm.sh/@wagmi/core/chains'
+        import { reconnect, sendTransaction, getAccount, watchAccount, switchChain } from 'https://esm.sh/@wagmi/core'
+        import { parseEther } from 'https://esm.sh/viem'
 
-    <button class="btn" id="transferBtn">确认并签名</button>
-    <div id="status">请先连接钱包</div>
-</div>
+        // 1. --- 初始化配置 ---
+        const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
+        const chains = [baseSepolia, base, mainnet];
+        const metadata = {
+            name: 'ClawWallet',
+            description: 'AI 驱动的支付工具',
+            url: 'https://clawwallet.vercel.app',
+            icons: ['https://avatars.githubusercontent.com/u/37784886']
+        };
 
-<script type="module">
-    // 引入 AppKit (WalletConnect)
-    import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.run/@web3modal/wagmi'
-    import { mainnet, base, baseSepolia } from 'https://esm.run/@wagmi/core/chains'
-    import { reconnect, sendTransaction, getAccount, parseEther } from 'https://esm.run/@wagmi/core'
-
-    // --- 配置区 ---
-    const projectId = '5e7a578ca3a6a096cd97a735e12b2253';
-    const metadata = {
-        name: 'ClawWallet',
-        description: 'Telegram AI Wallet Skill',
-        url: 'https://clawwallet.vercel.app',
-        icons: ['https://avatars.githubusercontent.com/u/37784886']
-    }
-
-    const chains = [mainnet, base, baseSepolia]
-    const wagmiConfig = defaultWagmiConfig({ chains, projectId, metadata })
-
-    // 初始化 Modal
-    const modal = createWeb3Modal({ wagmiConfig, projectId, chains })
-    reconnect(wagmiConfig)
-
-    // --- 业务逻辑 ---
-    const WebApp = window.Telegram.WebApp;
-    const params = new URLSearchParams(window.location.search);
-    const to = params.get('to');
-    const amount = params.get('amount') || "0";
-
-    document.getElementById('displayAmount').innerText = amount;
-    document.getElementById('displayTo').innerText = to;
-
-    const statusEl = document.getElementById('status');
-    const transferBtn = document.getElementById('transferBtn');
-
-    transferBtn.onclick = async () => {
-        const account = getAccount(wagmiConfig);
-
-        if (!account.isConnected) {
-            statusEl.innerText = "请先点击上方按钮连接钱包";
-            modal.open();
-            return;
-        }
-
+        const config = defaultWagmiConfig({ chains, projectId, metadata });
+        
+        const modal = createWeb3Modal({ 
+            wagmiConfig: config, 
+            projectId, 
+            chains,
+            enableAnalytics: false,
+            enableOnramp: false, 
+            themeMode: 'light'
+        });
+        
         try {
-            statusEl.innerText = "正在请求签名...";
-            WebApp.HapticFeedback.impactOccurred('medium');
-
-            const hash = await sendTransaction(wagmiConfig, {
-                to: to,
-                value: parseEther(amount),
-            });
-
-            statusEl.innerText = "✅ 交易已发出！";
-            WebApp.showAlert(`转账成功！\nHash: ${hash.substring(0,10)}...`, () => {
-                WebApp.close();
-            });
-        } catch (err) {
-            console.error(err);
-            statusEl.innerText = "❌ 交易取消或失败";
-            WebApp.HapticFeedback.notificationOccurred('error');
+            reconnect(config);
+        } catch (e) {
+            console.warn("钱包重新连接跳过", e);
         }
-    };
 
-    WebApp.ready();
-</script>
+        // 2. --- Telegram WebApp 适配 ---
+        const WebApp = window.Telegram.WebApp;
+        WebApp.ready();
+        WebApp.expand();
 
+        const params = new URLSearchParams(window.location.search);
+        const to = params.get('to') || "0x0000000000000000000000000000000000000000";
+        const amount = params.get('amount') || "0.00";
+        const symbol = params.get('symbol') || "ETH"; // 新增：从 URL 获取币种符号，默认为 ETH
+        const targetChainId = baseSepolia.id;
+
+        document.getElementById('display-amount').innerText = amount;
+        document.getElementById('display-currency').innerText = symbol;
+        document.getElementById('display-to').innerText = to;
+
+        const mainBtn = document.getElementById('main-action-btn');
+        const statusText = document.getElementById('status-text');
+
+        // 3. --- 连接状态监视器 ---
+        watchAccount(config, {
+            onChange(account) {
+                if (account.isConnected) {
+                    onWalletConnected(account);
+                } else {
+                    onWalletDisconnected();
+                }
+            }
+        });
+
+        function onWalletConnected(account) {
+            mainBtn.innerText = `✅ 已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
+            mainBtn.style.backgroundColor = "#4caf50";
+            statusText.innerText = "钱包已就绪";
+            
+            // 设置 Telegram 原生按钮，使用动态币种
+            WebApp.MainButton.setText(`确认发送 ${amount} ${symbol}`)
+                .show()
+                .onClick(handleFinalPayment);
+            
+            if (account.chainId !== targetChainId) {
+                statusText.innerText = `⚠️ 请切换至 Base Sepolia 网络`;
+                WebApp.MainButton.setText("切换网络并支付");
+            }
+        }
+
+        function onWalletDisconnected() {
+            mainBtn.innerText = "🔗 连接钱包";
+            mainBtn.style.backgroundColor = "var(--tg-theme-button-color)";
+            statusText.innerText = "请先连接钱包";
+            WebApp.MainButton.hide();
+        }
+
+        // 4. --- 按钮交互逻辑 ---
+        mainBtn.onclick = () => {
+            const account = getAccount(config);
+            if (!account.isConnected) {
+                modal.open().catch(err => {
+                    console.error("无法打开 Modal:", err);
+                    WebApp.showAlert("无法调起钱包选择器，请检查权限。");
+                });
+            }
+        };
+
+        async function handleFinalPayment() {
+            const account = getAccount(config);
+
+            if (account.chainId !== targetChainId) {
+                try {
+                    statusText.innerText = "请求切换网络...";
+                    await switchChain(config, { chainId: targetChainId });
+                    return; 
+                } catch (e) {
+                    WebApp.showAlert("网络切换失败，请手动调整至 Base Sepolia");
+                    return;
+                }
+            }
+
+            try {
+                WebApp.MainButton.showProgress();
+                statusText.innerText = "⏳ 正在请求签名...";
+                
+                const hash = await sendTransaction(config, {
+                    to: to,
+                    value: parseEther(amount),
+                });
+
+                statusText.innerText = "✅ 交易成功！";
+                WebApp.HapticFeedback.notificationOccurred('success');
+                
+                WebApp.showAlert(`转账已提交！\nHash: ${hash.slice(0,15)}...`, () => {
+                    WebApp.close();
+                });
+            } catch (err) {
+                WebApp.MainButton.hideProgress();
+                statusText.innerText = "❌ 交易失败: " + (err.shortMessage || "用户已拒绝");
+                WebApp.HapticFeedback.notificationOccurred('error');
+            }
+        }
+
+        statusText.classList.add('pulse');
+    </script>
 </body>
 </html>
