@@ -291,7 +291,7 @@
             if (name.includes('tokenpocket')) return "tpoutside://";
             if (name.includes('imtoken')) return "imtokenv2://";
             if (name.includes('phantom')) return "phantom://";
-            if (name.includes('pundi wallet')) return "fxdapp://";
+            if (name.includes('fxwallet')) return "wc://";
 
             // 策略 B: 从 WalletConnect Session 获取 (结构化提取)
             if (connector.id === 'walletConnect') {
