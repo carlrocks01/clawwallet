@@ -279,36 +279,41 @@
             themeMode: 'light'
         });
 
-        // 3. --- 动态重定向逻辑 (模仿 Uniswap) ---
-        const getBestRedirectUrl = async () => {
-            const { connector } = getAccount(config);
-            if (!connector) return null;
+        // 3. --- 缓存重定向 URL (解决点击时的异步延迟) ---
+        let cachedRedirectUrl = null;
 
-            // 策略 A: 检查 LocalStorage (Uniswap 同款逻辑)
+        const updateCachedUrl = async () => {
+            const { connector, isConnected } = getAccount(config);
+            if (!isConnected || !connector) return;
+
+            // 策略 1: 检查 LocalStorage
             try {
                 const choice = localStorage.getItem('WALLETCONNECT_DEEPLINK_CHOICE');
                 if (choice) {
                     const parsed = JSON.parse(choice);
-                    if (parsed.href) return parsed.href;
+                    if (parsed.href) {
+                        cachedRedirectUrl = parsed.href;
+                        return;
+                    }
                 }
             } catch (e) {}
 
-            // 策略 B: 从 Session Metadata 中提取
-            try {
-                const provider = await connector.getProvider();
-                const session = provider?.session;
-                const redirect = session?.peer?.metadata?.redirect;
-                const url = redirect?.native || redirect?.universal;
-                if (url) return url;
-            } catch (e) {}
+            // 策略 2: 从 Session Metadata 提取
+            if (connector.id === 'walletConnect') {
+                try {
+                    const provider = await connector.getProvider();
+                    const redirect = provider?.session?.peer?.metadata?.redirect;
+                    cachedRedirectUrl = redirect?.native || redirect?.universal || null;
+                } catch (e) {}
+            }
 
-            // 策略 C: 针对 Pundi Wallet 的显式兜底
-            const name = connector.name.toLowerCase();
-            if (name.includes('pundi')) return "wc://"; // Pundi X / Pundi Wallet 通常响应 wc: 协议
-            if (name.includes('metamask')) return "https://metamask.app.link/";
-            if (name.includes('okx')) return "okx://wallet/dapp/details";
-            
-            return "https://metamask.app.link/"; // 最终兜底
+            // 策略 3: 名称兜底
+            if (!cachedRedirectUrl) {
+                const name = connector.name.toLowerCase();
+                if (name.includes('pundi')) cachedRedirectUrl = "wc://"; 
+                else if (name.includes('metamask')) cachedRedirectUrl = "https://metamask.app.link/";
+                else if (name.includes('okx')) cachedRedirectUrl = "okx://wallet/dapp/details";
+            }
         };
 
         // 4. --- 业务流 ---
@@ -341,10 +346,9 @@
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包 App 签名交易...";
                 
-                // 【核心优化】同步获取 URL 并立即调用 openLink
-                const url = await getBestRedirectUrl();
-                if (url) {
-                    WebApp.openLink(url, { try_instant_view: false });
+                // 【核心优化】使用缓存的 URL 立即跳转，不等待异步获取
+                if (cachedRedirectUrl) {
+                    WebApp.openLink(cachedRedirectUrl, { try_instant_view: false });
                 }
 
                 helper.style.display = "block";
@@ -371,9 +375,13 @@
                 console.error("Action Error:", err);
                 WebApp.MainButton.hideProgress();
                 const shortErr = err.shortMessage || err.message || "";
-                statusInfo.innerText = "❌ 失败: " + (shortErr.includes("rejected") ? "用户取消" : "签名超时");
                 
-                if (!shortErr.includes("rejected")) {
+                // 优化错误显示
+                if (shortErr.includes("rejected")) {
+                    statusInfo.innerText = "❌ 失败: 用户已取消";
+                } else {
+                    statusInfo.innerText = "❌ 失败: 签名超时或钱包未响应";
+                    // 补救措施：如果超时，尝试打开账户视图强制触发同步
                     modal.open({ view: 'Account' });
                 }
                 WebApp.HapticFeedback.notificationOccurred('error');
@@ -394,6 +402,9 @@
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...`;
                     
+                    // 异步更新缓存的重定向链接
+                    updateCachedUrl();
+
                     let btnT = "连接成功 - 返回";
                     if (isApprove) btnT = "确认授权";
                     else if (isTransfer) btnT = "确认转账";
@@ -410,6 +421,7 @@
                     mainBtn.innerText = "🔗 连接钱包";
                     mainBtn.className = "btn-primary";
                     mainBtn.disabled = false;
+                    cachedRedirectUrl = null;
                     WebApp.MainButton.hide();
                 }
             }
@@ -419,8 +431,8 @@
         mainBtn.onclick = handleBlockchainAction;
         
         helper.onclick = async () => {
-            const url = await getBestRedirectUrl();
-            if (url) WebApp.openLink(url, { try_instant_view: false });
+            if (cachedRedirectUrl) WebApp.openLink(cachedRedirectUrl, { try_instant_view: false });
+            else modal.open({ view: 'Account' });
         };
 
         statusInfo.classList.add('pulse');
