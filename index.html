@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OpenClaw-Wallet</title>
-    <!-- Telegram 官方 WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
@@ -182,11 +181,11 @@
 
     <div class="container">
         <div class="card">
-            <div id="action-badge" class="status-badge">读取数据中...</div>
+            <div id="action-badge" class="status-badge">解析参数中...</div>
             
             <div class="connection-status">
                 <span class="dot" id="conn-dot"></span>
-                <span id="conn-text">未连接钱包</span>
+                <span id="conn-text">初始化钱包...</span>
             </div>
 
             <div id="ui-main-content">
@@ -209,27 +208,14 @@
                 </div>
             </div>
 
-            <!-- 主交互按钮 -->
-            <button class="btn-primary" id="main-btn">🔗 连接钱包</button>
-            
-            <!-- 唤起失败辅助 -->
-            <div id="wallet-helper">没反应？点此尝试重新唤起钱包</div>
-            
-            <div id="status-info">网络环境: Ethereum Sepolia</div>
+            <button class="btn-primary" id="main-btn" disabled>⌛ 正在启动...</button>
+            <div id="wallet-helper">无法连接？点击重试</div>
+            <div id="status-info">正在连接 Ethereum Sepolia...</div>
         </div>
     </div>
 
     <script type="module">
-        // 导入放在最上面，虽然它们是异步的，但浏览器会并行处理
-        import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
-        import { sepolia } from 'https://esm.sh/@wagmi/core/chains'
-        import { reconnect, sendTransaction, writeContract, getAccount, watchAccount, parseEther } from 'https://esm.sh/@wagmi/core'
-
-        // --- 1. 立即处理 UI，不等待 SDK 加载 ---
-        const WebApp = window.Telegram.WebApp;
-        WebApp.ready();
-        WebApp.expand();
-
+        // 1. --- 静态 UI 立即更新 ---
         const params = new URLSearchParams(window.location.search);
         const toAddress = params.get('to');
         const amountStr = params.get('amount') || "0.00";
@@ -241,152 +227,155 @@
         const isTransfer = !!(toAddress && amountStr && amountStr !== "0.00");
         let actionType = isApprove ? 'approve' : (isTransfer ? 'transfer' : 'connect');
 
-        const badgeEl = document.getElementById('action-badge');
-        const amtEl = document.getElementById('amt');
-        const symEl = document.getElementById('sym');
-        const addrEl = document.getElementById('addr');
-        const tokenBox = document.getElementById('token-box');
-        const statusInfo = document.getElementById('status-info');
-        const mainBtn = document.getElementById('main-btn');
-        const walletHelper = document.getElementById('wallet-helper');
-        const connDot = document.getElementById('conn-dot');
-        const connText = document.getElementById('conn-text');
+        const updateStaticUI = () => {
+            document.getElementById('amt').innerText = amountStr;
+            document.getElementById('sym').innerText = symbol;
+            const badge = document.getElementById('action-badge');
+            const addrValue = document.getElementById('addr');
+            const label = document.getElementById('target-label');
 
-        // 立即更新 UI，解决“正在初始化”卡死感
-        amtEl.innerText = amountStr;
-        symEl.innerText = symbol;
-
-        if (isApprove) {
-            badgeEl.innerText = "代币授权 (Approve)";
-            addrEl.innerText = spender;
-            document.getElementById('target-label').innerText = "授权给";
-            tokenBox.style.display = "block";
-            document.getElementById('token-addr').innerText = token;
-        } else if (isTransfer) {
-            badgeEl.innerText = "转账确认 (Transfer)";
-            addrEl.innerText = toAddress;
-        } else {
-            badgeEl.innerText = "钱包连接 (Connect)";
-            if (!isTransfer && !isApprove) {
+            if (isApprove) {
+                badge.innerText = "代币授权 (Approve)";
+                addrValue.innerText = spender;
+                label.innerText = "授权给";
+                document.getElementById('token-box').style.display = "block";
+                document.getElementById('token-addr').innerText = token;
+            } else if (isTransfer) {
+                badge.innerText = "转账确认 (Transfer)";
+                addrValue.innerText = toAddress;
+            } else {
+                badge.innerText = "钱包连接 (Connect)";
                 document.getElementById('ui-main-content').style.display = "none";
             }
-        }
-
-        // --- 2. 配置 Web3Modal ---
-        const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
-        const chains = [sepolia];
-        const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
-        
-        const metadata = {
-            name: 'OpenClaw-Wallet',
-            description: 'AI EVM Wallet',
-            url: appUrl,
-            icons: ['https://avatars.githubusercontent.com/u/37784886']
         };
+        updateStaticUI();
 
-        const config = defaultWagmiConfig({ chains, projectId, metadata });
-        const modal = createWeb3Modal({ 
-            wagmiConfig: config, 
-            projectId, 
-            chains,
-            enableAnalytics: false,
-            defaultChain: sepolia, 
-            themeMode: 'light'
-        });
+        // 2. --- 异步初始化 SDK ---
+        try {
+            const [web3modal, wagmiChains, wagmiCore, viem] = await Promise.all([
+                import('https://esm.sh/@web3modal/wagmi@5.1.11'),
+                import('https://esm.sh/@wagmi/core/chains'),
+                import('https://esm.sh/@wagmi/core'),
+                import('https://esm.sh/viem')
+            ]);
 
-        // --- 3. 业务逻辑 ---
-        let isProcessing = false;
+            const { createWeb3Modal, defaultWagmiConfig } = web3modal;
+            const { sepolia } = wagmiChains;
+            const { reconnect, sendTransaction, writeContract, getAccount, watchAccount } = wagmiCore;
+            const { parseEther } = viem;
 
-        const handleBlockchainAction = async () => {
-            const account = getAccount(config);
-            if (!account.isConnected) {
-                modal.open();
-                return;
-            }
+            // 应用你提供的 Project ID
+            const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
+            console.log("Project ID Length:", projectId.length); // 调试输出
 
-            if (isProcessing) return;
-            isProcessing = true;
+            const chains = [sepolia];
+            const appUrl = (window.location.origin === 'null' || !window.location.origin) ? 'https://clawwallet.vercel.app' : window.location.origin;
+            
+            const metadata = {
+                name: 'OpenClaw-Wallet',
+                description: 'AI EVM Wallet',
+                url: appUrl,
+                icons: ['https://avatars.githubusercontent.com/u/37784886']
+            };
 
-            if (actionType === 'connect' && !isTransfer && !isApprove) {
-                WebApp.close();
-                return;
-            }
+            const config = defaultWagmiConfig({ chains, projectId, metadata });
+            const modal = createWeb3Modal({ 
+                wagmiConfig: config, 
+                projectId, 
+                chains,
+                enableAnalytics: false,
+                defaultChain: sepolia, 
+                themeMode: 'light'
+            });
 
-            try {
-                WebApp.MainButton.showProgress();
-                statusInfo.innerText = "⏳ 正在唤起钱包确认...";
-                walletHelper.style.display = "block";
+            const WebApp = window.Telegram.WebApp;
+            WebApp.ready();
+            WebApp.expand();
 
-                const cleanAmountStr = amountStr.toString().replace(/[^0-9.]/g, '');
-                const finalAmount = parseEther(cleanAmountStr || "0");
+            const mainBtn = document.getElementById('main-btn');
+            const statusInfo = document.getElementById('status-info');
+            const connText = document.getElementById('conn-text');
+            const connDot = document.getElementById('conn-dot');
 
-                let txHash;
-                if (isApprove) {
-                    txHash = await writeContract(config, {
-                        address: token,
-                        abi: [{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}],
-                        functionName: 'approve',
-                        args: [spender, finalAmount]
-                    });
-                } else {
-                    txHash = await sendTransaction(config, {
-                        to: toAddress,
-                        value: finalAmount,
-                    });
-                }
+            mainBtn.disabled = false;
+            mainBtn.innerText = "🔗 连接钱包";
+            connText.innerText = "未连接钱包";
 
-                statusInfo.innerText = "✅ 交易已提交！";
-                WebApp.HapticFeedback.notificationOccurred('success');
-                WebApp.showAlert(`转账成功提交！\nHash: ${txHash.slice(0,12)}...`, () => WebApp.close());
-            } catch (err) {
-                console.error("Transaction Error:", err);
-                WebApp.MainButton.hideProgress();
-                const errMsg = err.shortMessage || "用户取消或环境不支持自动跳转";
-                statusInfo.innerText = "❌ 转账失败: " + errMsg;
-                if (err.message && (err.message.includes("timeout") || err.message.includes("not found"))) {
+            let isProcessing = false;
+
+            const handleAction = async () => {
+                const account = getAccount(config);
+                if (!account.isConnected) {
                     modal.open();
+                    return;
                 }
-                WebApp.HapticFeedback.notificationOccurred('error');
-            } finally {
-                isProcessing = false;
-                walletHelper.style.display = "none";
-            }
-        };
+                if (isProcessing) return;
+                isProcessing = true;
 
-        // --- 4. 监听状态更新 UI ---
-        watchAccount(config, {
-            onChange(account) {
-                WebApp.MainButton.offClick(handleBlockchainAction);
-                
-                if (account.isConnected) {
-                    connDot.classList.add('dot-connected');
-                    connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
-                    
-                    let btnText = "连接成功 - 返回";
-                    if (isApprove) btnText = `确认授权 ${symbol}`;
-                    else if (isTransfer) btnText = `确认转账 ${amountStr} ${symbol}`;
-                    
-                    mainBtn.innerText = `✅ ${btnText}`;
-                    mainBtn.className = "btn-primary btn-success";
-                    statusInfo.innerText = "钱包已就绪";
-                    WebApp.MainButton.setText(btnText).show().onClick(handleBlockchainAction);
-                } else {
-                    connDot.classList.remove('dot-connected');
-                    connText.innerText = "未连接钱包";
-                    mainBtn.innerText = "🔗 连接钱包";
-                    mainBtn.className = "btn-primary";
-                    statusInfo.innerText = "请连接 Sepolia 钱包";
-                    WebApp.MainButton.hide();
+                try {
+                    WebApp.MainButton.showProgress();
+                    statusInfo.innerText = "⏳ 正在唤起确认...";
+                    const cleanAmt = amountStr.toString().replace(/[^0-9.]/g, '');
+                    const finalAmount = parseEther(cleanAmt || "0");
+
+                    let txHash;
+                    if (isApprove) {
+                        txHash = await writeContract(config, {
+                            address: token,
+                            abi: [{"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}],
+                            functionName: 'approve',
+                            args: [spender, finalAmount]
+                        });
+                    } else if (isTransfer) {
+                        txHash = await sendTransaction(config, {
+                            to: toAddress,
+                            value: finalAmount,
+                        });
+                    } else {
+                        WebApp.close();
+                        return;
+                    }
+                    WebApp.showAlert(`交易提交成功！`, () => WebApp.close());
+                } catch (e) {
+                    statusInfo.innerText = "❌ 失败: " + (e.shortMessage || "用户取消");
+                    if (e.message.includes("timeout")) modal.open();
+                } finally {
+                    isProcessing = false;
+                    WebApp.MainButton.hideProgress();
                 }
-            }
-        });
+            };
 
-        // 初始化连接
-        try { reconnect(config); } catch (e) {}
+            watchAccount(config, {
+                onChange(account) {
+                    WebApp.MainButton.offClick(handleAction);
+                    if (account.isConnected) {
+                        connDot.classList.add('dot-connected');
+                        connText.innerText = `已连接: ${account.address.slice(0,6)}...`;
+                        let btnT = actionType === 'approve' ? '确认授权' : (actionType === 'transfer' ? '确认转账' : '连接成功');
+                        mainBtn.innerText = "✅ " + btnT;
+                        mainBtn.className = "btn-primary btn-success";
+                        WebApp.MainButton.setText(btnT).show().onClick(handleAction);
+                    } else {
+                        connDot.classList.remove('dot-connected');
+                        connText.innerText = "未连接钱包";
+                        mainBtn.innerText = "🔗 连接钱包";
+                        mainBtn.className = "btn-primary";
+                        WebApp.MainButton.hide();
+                    }
+                }
+            });
 
-        mainBtn.onclick = handleBlockchainAction;
-        walletHelper.onclick = () => modal.open();
-        statusInfo.classList.add('pulse');
+            reconnect(config).catch(() => {});
+            mainBtn.onclick = handleAction;
+            document.getElementById('wallet-helper').onclick = () => modal.open();
+
+        } catch (err) {
+            console.error(err);
+            document.getElementById('status-info').innerText = "❌ ID 或网络错误";
+            document.getElementById('main-btn').innerText = "重试";
+            document.getElementById('main-btn').disabled = false;
+            document.getElementById('main-btn').onclick = () => location.reload();
+        }
     </script>
 </body>
 </html>
