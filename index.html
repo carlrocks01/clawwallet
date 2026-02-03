@@ -310,7 +310,7 @@
             // 策略 3: 名称兜底
             if (!cachedRedirectUrl) {
                 const name = connector.name.toLowerCase();
-                if (name.includes('pundi')) cachedRedirectUrl = "wc://"; 
+                if (name.includes('pundi')) cachedRedirectUrl = "fxwallet://"; 
                 else if (name.includes('metamask')) cachedRedirectUrl = "https://metamask.app.link/";
                 else if (name.includes('okx')) cachedRedirectUrl = "okx://wallet/dapp/details";
             }
