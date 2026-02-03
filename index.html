@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ClawWallet 支付确认</title>
+    <title>ClawWallet 交易执行终端</title>
     <!-- Telegram 官方 WebApp SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -25,8 +25,7 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            -webkit-user-select: none;
-            user-select: none;
+            overflow: hidden;
         }
 
         .container {
@@ -38,31 +37,25 @@
 
         .card {
             background-color: var(--tg-theme-secondary-bg-color);
-            border-radius: 20px;
+            border-radius: 24px;
             padding: 24px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
             text-align: center;
         }
 
-        .header {
-            margin-bottom: 24px;
-        }
-
-        .title {
-            font-size: 18px;
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
             font-weight: 600;
-            margin: 0;
-            color: var(--tg-theme-text-color);
+            margin-bottom: 16px;
+            background: #f1f1f4;
+            color: #666;
         }
 
-        .amount-container {
-            margin: 24px 0;
-        }
-
-        .amount-label {
-            font-size: 14px;
-            color: var(--tg-theme-hint-color);
-            margin-bottom: 8px;
+        .amount-display {
+            margin: 16px 0;
         }
 
         .amount-value {
@@ -79,11 +72,11 @@
         }
 
         .details-box {
-            background-color: #f1f1f4;
-            border-radius: 12px;
+            background-color: #f8f8fa;
+            border-radius: 16px;
             padding: 16px;
             text-align: left;
-            margin-bottom: 24px;
+            margin: 20px 0;
         }
 
         .detail-item {
@@ -95,7 +88,7 @@
         }
 
         .detail-label {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--tg-theme-hint-color);
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -103,39 +96,32 @@
         }
 
         .detail-value {
-            font-size: 14px;
+            font-size: 13px;
             font-family: 'SF Mono', 'Roboto Mono', monospace;
             word-break: break-all;
             color: var(--tg-theme-text-color);
             line-height: 1.4;
         }
 
-        .action-button {
+        .btn-primary {
             background-color: var(--tg-theme-button-color);
             color: var(--tg-theme-button-text-color);
             border: none;
             padding: 16px;
-            border-radius: 12px;
+            border-radius: 14px;
             font-size: 16px;
             font-weight: 600;
             width: 100%;
             cursor: pointer;
-            transition: transform 0.1s ease, opacity 0.2s ease;
-            box-shadow: 0 4px 12px rgba(36, 129, 204, 0.2);
+            transition: all 0.2s ease;
         }
 
-        .action-button:active {
+        .btn-primary:active {
             transform: scale(0.98);
             opacity: 0.9;
         }
 
-        .action-button:disabled {
-            background-color: #ccc;
-            box-shadow: none;
-            cursor: not-allowed;
-        }
-
-        #status-text {
+        #status-info {
             margin-top: 16px;
             font-size: 13px;
             color: var(--tg-theme-hint-color);
@@ -156,169 +142,202 @@
 
     <div class="container">
         <div class="card">
-            <div class="header">
-                <h1 class="title">确认交易</h1>
-            </div>
-
-            <div class="amount-container">
-                <div class="amount-label">支付金额</div>
-                <div class="amount-value">
-                    <span id="display-amount">0.00</span><span class="currency" id="display-currency">ETH</span>
-                </div>
-            </div>
-
-            <div class="details-box">
-                <div class="detail-item">
-                    <div class="detail-label">接收地址</div>
-                    <div class="detail-value" id="display-to">正在解析地址...</div>
-                </div>
-                <div class="detail-item">
-                    <div class="detail-label">网络环境</div>
-                    <div class="detail-value" id="display-network">Base Sepolia (Testnet)</div>
-                </div>
-            </div>
-
-            <button class="action-button" id="main-action-btn">🔗 连接钱包</button>
+            <div id="action-badge" class="status-badge">正在初始化...</div>
             
-            <div id="status-text">请连接支持 EVM 的钱包以继续</div>
+            <div id="ui-main-content">
+                <div class="amount-display">
+                    <p id="label-text" style="font-size: 14px; color: #8e8e93; margin: 0;">交易金额</p>
+                    <div class="amount-value">
+                        <span id="amt">0.00</span><span class="currency" id="sym">ETH</span>
+                    </div>
+                </div>
+
+                <div class="details-box">
+                    <div class="detail-item">
+                        <div id="target-label" class="detail-label">目标地址</div>
+                        <div id="addr" class="detail-value">正在解析参数...</div>
+                    </div>
+                    <div id="token-box" class="detail-item" style="display:none;">
+                        <div class="detail-label">代币合约 (Contract)</div>
+                        <div id="token-addr" class="detail-value">...</div>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn-primary" id="connect-btn">🔗 连接钱包</button>
+            
+            <div id="status-info">请确保您的钱包已切换至 Sepolia 网络</div>
         </div>
     </div>
 
-    <!-- 核心逻辑脚本 -->
+    <!-- 核心逻辑脚本：使用 esm.sh 解决依赖报错 -->
     <script type="module">
-        // 使用具体的版本号确保稳定性，并从 viem 导入 parseEther
         import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
-        import { mainnet, base, baseSepolia } from 'https://esm.sh/@wagmi/core/chains'
-        import { reconnect, sendTransaction, getAccount, watchAccount, switchChain } from 'https://esm.sh/@wagmi/core'
+        import { sepolia, mainnet } from 'https://esm.sh/@wagmi/core/chains'
+        import { reconnect, sendTransaction, writeContract, getAccount, watchAccount, switchChain } from 'https://esm.sh/@wagmi/core'
         import { parseEther } from 'https://esm.sh/viem'
 
-        // 1. --- 初始化配置 ---
+        // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
-        const chains = [baseSepolia, base, mainnet];
+        const chains = [sepolia, mainnet];
         const metadata = {
             name: 'ClawWallet',
-            description: 'AI 驱动的支付工具',
-            url: 'https://clawwallet.vercel.app',
+            description: 'AI 驱动的 EVM 交易执行终端',
+            url: window.location.origin,
             icons: ['https://avatars.githubusercontent.com/u/37784886']
         };
 
         const config = defaultWagmiConfig({ chains, projectId, metadata });
-        
         const modal = createWeb3Modal({ 
             wagmiConfig: config, 
             projectId, 
             chains,
             enableAnalytics: false,
-            enableOnramp: false, 
             themeMode: 'light'
         });
         
-        try {
-            reconnect(config);
-        } catch (e) {
-            console.warn("钱包重新连接跳过", e);
-        }
+        try { reconnect(config); } catch (e) { console.warn("Reconnection failed"); }
 
-        // 2. --- Telegram WebApp 适配 ---
+        // 2. --- Telegram 环境适配 ---
         const WebApp = window.Telegram.WebApp;
         WebApp.ready();
         WebApp.expand();
 
         const params = new URLSearchParams(window.location.search);
-        const to = params.get('to') || "0x0000000000000000000000000000000000000000";
+        const action = params.get('action') || 'transfer';
+        const to = params.get('to');
+        const spender = params.get('spender');
+        const token = params.get('token');
         const amount = params.get('amount') || "0.00";
-        const symbol = params.get('symbol') || "ETH"; // 新增：从 URL 获取币种符号，默认为 ETH
-        const targetChainId = baseSepolia.id;
+        const symbol = params.get('symbol') || "ETH";
+        const targetChainId = sepolia.id;
 
-        document.getElementById('display-amount').innerText = amount;
-        document.getElementById('display-currency').innerText = symbol;
-        document.getElementById('display-to').innerText = to;
+        // UI 填充
+        const badgeEl = document.getElementById('action-badge');
+        const amtEl = document.getElementById('amt');
+        const symEl = document.getElementById('sym');
+        const addrEl = document.getElementById('addr');
+        const tokenBox = document.getElementById('token-box');
+        const statusInfo = document.getElementById('status-info');
+        const connectBtn = document.getElementById('connect-btn');
 
-        const mainBtn = document.getElementById('main-action-btn');
-        const statusText = document.getElementById('status-text');
+        amtEl.innerText = amount;
+        symEl.innerText = symbol;
 
-        // 3. --- 连接状态监视器 ---
+        if (action === 'approve') {
+            badgeEl.innerText = "代币授权 (Approve)";
+            addrEl.innerText = spender;
+            document.getElementById('target-label').innerText = "授权给 (Spender)";
+            tokenBox.style.display = "block";
+            document.getElementById('token-addr').innerText = token;
+        } else if (action === 'transfer') {
+            badgeEl.innerText = "转账确认 (Transfer)";
+            addrEl.innerText = to;
+        } else if (action === 'connect') {
+            badgeEl.innerText = "钱包授权 (Connect)";
+            document.getElementById('ui-main-content').style.display = "none";
+        }
+
+        // 3. --- 钱包状态监听 ---
         watchAccount(config, {
             onChange(account) {
                 if (account.isConnected) {
-                    onWalletConnected(account);
+                    onConnected(account);
                 } else {
-                    onWalletDisconnected();
+                    onDisconnected();
                 }
             }
         });
 
-        function onWalletConnected(account) {
-            mainBtn.innerText = `✅ 已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
-            mainBtn.style.backgroundColor = "#4caf50";
-            statusText.innerText = "钱包已就绪";
-            
-            // 设置 Telegram 原生按钮，使用动态币种
-            WebApp.MainButton.setText(`确认发送 ${amount} ${symbol}`)
+        function onConnected(account) {
+            connectBtn.innerText = `✅ 已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
+            connectBtn.style.backgroundColor = "#4caf50";
+            statusInfo.innerText = "就绪，请使用底部按钮确认交易";
+
+            // 激活 Telegram 主按钮
+            const btnText = action === 'approve' ? `签署授权 ${symbol}` : `确认支付 ${amount} ${symbol}`;
+            WebApp.MainButton.setText(btnText)
                 .show()
-                .onClick(handleFinalPayment);
-            
+                .onClick(handleExecution);
+
             if (account.chainId !== targetChainId) {
-                statusText.innerText = `⚠️ 请切换至 Base Sepolia 网络`;
-                WebApp.MainButton.setText("切换网络并支付");
+                statusInfo.innerText = "⚠️ 请切换至 Sepolia 测试网络";
+                WebApp.MainButton.setText("切换网络并重试");
             }
         }
 
-        function onWalletDisconnected() {
-            mainBtn.innerText = "🔗 连接钱包";
-            mainBtn.style.backgroundColor = "var(--tg-theme-button-color)";
-            statusText.innerText = "请先连接钱包";
+        function onDisconnected() {
+            connectBtn.innerText = "🔗 连接钱包";
+            connectBtn.style.backgroundColor = "var(--tg-theme-button-color)";
+            statusInfo.innerText = "请先连接钱包以继续";
             WebApp.MainButton.hide();
         }
 
-        // 4. --- 按钮交互逻辑 ---
-        mainBtn.onclick = () => {
+        // 4. --- 核心业务：发送交易 (Broadcasting) ---
+        connectBtn.onclick = () => {
             const account = getAccount(config);
-            if (!account.isConnected) {
-                modal.open().catch(err => {
-                    console.error("无法打开 Modal:", err);
-                    WebApp.showAlert("无法调起钱包选择器，请检查权限。");
-                });
-            }
+            if (!account.isConnected) modal.open();
         };
 
-        async function handleFinalPayment() {
+        async function handleExecution() {
             const account = getAccount(config);
 
+            // 自动检查网络
             if (account.chainId !== targetChainId) {
                 try {
-                    statusText.innerText = "请求切换网络...";
+                    statusInfo.innerText = "正在请求切换网络...";
                     await switchChain(config, { chainId: targetChainId });
                     return; 
                 } catch (e) {
-                    WebApp.showAlert("网络切换失败，请手动调整至 Base Sepolia");
+                    WebApp.showAlert("请在钱包中手动选择 Ethereum Sepolia 网络");
                     return;
                 }
             }
 
+            if (action === 'connect') {
+                WebApp.close();
+                return;
+            }
+
             try {
                 WebApp.MainButton.showProgress();
-                statusText.innerText = "⏳ 正在请求签名...";
+                statusInfo.innerText = "⏳ 正在请求钱包签名并广播交易...";
                 
-                const hash = await sendTransaction(config, {
-                    to: to,
-                    value: parseEther(amount),
-                });
+                let txHash;
+                if (action === 'approve') {
+                    // 执行 ERC20 Approve
+                    txHash = await writeContract(config, {
+                        address: token,
+                        abi: [{
+                            "inputs": [{"name": "spender", "type": "address"}, {"name": "amount", "type": "uint256"}],
+                            "name": "approve", "outputs": [{"name": "", "type": "bool"}],
+                            "stateMutability": "nonpayable", "type": "function"
+                        }],
+                        functionName: 'approve',
+                        args: [spender, parseEther(amount)]
+                    });
+                } else {
+                    // 执行原生 ETH 转账
+                    txHash = await sendTransaction(config, {
+                        to: to,
+                        value: parseEther(amount),
+                    });
+                }
 
-                statusText.innerText = "✅ 交易成功！";
+                statusInfo.innerText = "✅ 交易已在区块链上成功广播！";
                 WebApp.HapticFeedback.notificationOccurred('success');
                 
-                WebApp.showAlert(`转账已提交！\nHash: ${hash.slice(0,15)}...`, () => {
+                WebApp.showAlert(`交易成功！\nHash: ${txHash.slice(0,12)}...`, () => {
                     WebApp.close();
                 });
             } catch (err) {
                 WebApp.MainButton.hideProgress();
-                statusText.innerText = "❌ 交易失败: " + (err.shortMessage || "用户已拒绝");
+                statusInfo.innerText = "❌ 失败: " + (err.shortMessage || "用户拒绝或余额不足");
                 WebApp.HapticFeedback.notificationOccurred('error');
             }
         }
 
-        statusText.classList.add('pulse');
+        statusInfo.classList.add('pulse');
     </script>
 </body>
 </html>
