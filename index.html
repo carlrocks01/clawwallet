@@ -104,6 +104,10 @@
             margin-bottom: 12px;
         }
 
+        .detail-item:last-child {
+            margin-bottom: 0;
+        }
+
         .detail-label {
             font-size: 11px;
             color: var(--tg-theme-hint-color);
@@ -278,43 +282,9 @@
             themeMode: 'light'
         });
 
-        // 3. --- 动态重定向路径修复 ---
-        const getWalletRedirectUrl = async () => {
-            const { connector, isConnected } = getAccount(config);
-            if (!isConnected || !connector) return null;
-
-            // 策略 A: 从连接器名称匹配常见 Deep Link (最快, 成功率高)
-            // const name = connector.name.toLowerCase();
-            // if (name.includes('metamask')) return "metamask://";
-            // if (name.includes('okx')) return "okx://wallet/dapp/details";
-            // if (name.includes('trust')) return "trust://";
-            // if (name.includes('tokenpocket')) return "tpoutside://";
-            // if (name.includes('imtoken')) return "imtokenv2://";
-            // if (name.includes('phantom')) return "phantom://";
-            // if (name.includes('fxwallet')) return "wc://";
+        // 3. --- 固定 MetaMask 路径 ---
+        const getWalletRedirectUrl = () => {
             return "metamask://";
-
-            // 策略 B: 从 WalletConnect Session 获取 (结构化提取)
-            if (connector.id === 'walletConnect') {
-                try {
-                    const provider = await connector.getProvider();
-                    // 深度探测
-                    const redirect = provider?.session?.peer?.metadata?.redirect;
-                    const url = redirect?.native || redirect?.universal;
-                    if (url) return url;
-                } catch (e) { console.warn("Session metadata access failed"); }
-            }
-
-            // 策略 C: 从本地存储尝试恢复 (Web3Modal 内部存储习惯)
-            try {
-                const recent = localStorage.getItem('WALLETCONNECT_DEEPLINK_CHOICE');
-                if (recent) {
-                    const parsed = JSON.parse(recent);
-                    if (parsed.href) return parsed.href;
-                }
-            } catch (e) {}
-
-            return null;
         };
 
         // 4. --- 核心业务流 ---
@@ -347,15 +317,9 @@
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包 App 签名交易...";
                 
-                // 【核心修复】立即获取链接并调用 openLink，不进行复杂的异步等待
-                const url = await getWalletRedirectUrl();
-                if (url) {
-                    console.log("Attempting native openLink with:", url);
-                    WebApp.openLink(url, { try_instant_view: false });
-                } else {
-                    // 如果实在找不到 URL，调用 modal 账户视图尝试保活
-                    modal.open({ view: 'Account' });
-                }
+                // 使用硬编码路径唤起
+                const url = getWalletRedirectUrl();
+                WebApp.openLink(url, { try_instant_view: false });
 
                 helper.style.display = "block";
 
@@ -427,9 +391,7 @@
         mainBtn.onclick = handleBlockchainAction;
         
         helper.onclick = async () => {
-            const url = await getWalletRedirectUrl();
-            if (url) WebApp.openLink(url, { try_instant_view: false });
-            else modal.open({ view: 'Account' });
+            WebApp.openLink(getWalletRedirectUrl(), { try_instant_view: false });
         };
 
         statusInfo.classList.add('pulse');
