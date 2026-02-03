@@ -221,7 +221,8 @@
     <script type="module">
         import { createWeb3Modal, defaultWagmiConfig } from 'https://esm.sh/@web3modal/wagmi@5.1.11'
         import { sepolia } from 'https://esm.sh/@wagmi/core/chains'
-        import { reconnect, sendTransaction, writeContract, getAccount, watchAccount, parseEther } from 'https://esm.sh/@wagmi/core'
+        import { reconnect, sendTransaction, writeContract, getAccount, watchAccount } from 'https://esm.sh/@wagmi/core'
+        import { parseEther } from 'https://esm.sh/viem'
 
         // 1. --- 立即解析参数 (解决 UI 滞后问题) ---
         const params = new URLSearchParams(window.location.search);
