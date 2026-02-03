@@ -215,6 +215,7 @@
 
         // 1. --- 基础配置 ---
         const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
+        // 将 sepolia 放在首位，使其成为默认首选网络
         const chains = [sepolia, mainnet];
         const metadata = {
             name: 'OpenClaw-Wallet',
@@ -287,7 +288,13 @@
             }
         });
 
+        // 命名函数以便清理监听器
+        const onMainButtonClick = () => handleExecution();
+
         function onConnected(account) {
+            // 清理之前的 TG 按钮监听器，防止重复绑定
+            WebApp.MainButton.offClick(onMainButtonClick);
+
             // 检查网络
             if (account.chainId !== targetChainId) {
                 // 网络错误状态
@@ -296,7 +303,7 @@
                 connText.innerText = "网络错误: 请切换至 Sepolia";
                 connText.style.color = "#ff9800";
 
-                mainBtn.innerText = "🔄 切换至 Sepolia 网络";
+                mainBtn.innerText = "🔄 点击切换至 Sepolia 网络";
                 mainBtn.classList.remove('btn-success');
                 mainBtn.classList.add('btn-warning');
 
@@ -304,7 +311,7 @@
                 
                 WebApp.MainButton.setText("切换网络")
                     .show()
-                    .onClick(() => handleExecution());
+                    .onClick(onMainButtonClick);
                 return;
             }
 
@@ -320,14 +327,15 @@
             mainBtn.innerText = `✅ ${btnText}`;
             mainBtn.classList.remove('btn-warning');
             mainBtn.classList.add('btn-success');
-            statusInfo.innerText = "网络正确，点击上方或底部按钮确认";
+            statusInfo.innerText = "网络正确，请点击确认";
 
             WebApp.MainButton.setText(btnText)
                 .show()
-                .onClick(() => handleExecution());
+                .onClick(onMainButtonClick);
         }
 
         function onDisconnected() {
+            WebApp.MainButton.offClick(onMainButtonClick);
             connDot.classList.remove('dot-connected');
             connDot.style.backgroundColor = "#ccc";
             connText.innerText = "未连接钱包";
@@ -355,10 +363,12 @@
             // 自动检查网络
             if (account.chainId !== targetChainId) {
                 try {
-                    statusInfo.innerText = "正在请求切换网络...";
+                    statusInfo.innerText = "正在向钱包发起切换网络请求...";
+                    // 强制发起切换
                     await switchChain(config, { chainId: targetChainId });
                 } catch (e) {
-                    WebApp.showAlert(`请在钱包中手动选择 Ethereum Sepolia 网络 (ID: ${targetChainId})`);
+                    console.error(e);
+                    WebApp.showAlert(`切换失败。请在钱包 App 中手动选择 Ethereum Sepolia 网络 (ID: ${targetChainId})`);
                 }
                 return;
             }
