@@ -147,6 +147,10 @@
             background-color: #4caf50 !important;
         }
 
+        .btn-warning {
+            background-color: #ff9800 !important;
+        }
+
         #status-info {
             margin-top: 16px;
             font-size: 13px;
@@ -210,7 +214,7 @@
         import { parseEther } from 'https://esm.sh/viem'
 
         // 1. --- 基础配置 ---
-        const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21'; 
+        const projectId = '3e32acd77b1e3fe41aa2fee70ba1bb21';                         
         const chains = [sepolia, mainnet];
         const metadata = {
             name: 'OpenClaw-Wallet',
@@ -242,7 +246,7 @@
         const token = params.get('token');
         const amount = params.get('amount') || "0.00";
         const symbol = params.get('symbol') || "ETH";
-        const targetChainId = sepolia.id;
+        const targetChainId = sepolia.id; // ChainID: 11155111
 
         // UI 填充
         const badgeEl = document.getElementById('action-badge');
@@ -284,33 +288,43 @@
         });
 
         function onConnected(account) {
-            // 更新连接状态 UI
+            // 检查网络
+            if (account.chainId !== targetChainId) {
+                // 网络错误状态
+                connDot.style.backgroundColor = "#ff9800";
+                connDot.classList.remove('dot-connected');
+                connText.innerText = "网络错误: 请切换至 Sepolia";
+                connText.style.color = "#ff9800";
+
+                mainBtn.innerText = "🔄 切换至 Sepolia 网络";
+                mainBtn.classList.remove('btn-success');
+                mainBtn.classList.add('btn-warning');
+
+                statusInfo.innerText = `⚠️ 当前 ChainID: ${account.chainId} (预期: ${targetChainId})`;
+                
+                WebApp.MainButton.setText("切换网络")
+                    .show()
+                    .onClick(() => handleExecution());
+                return;
+            }
+
+            // 正常连接状态
             connDot.classList.add('dot-connected');
+            connDot.style.backgroundColor = "#4caf50";
             connText.innerText = `已连接: ${account.address.slice(0,6)}...${account.address.slice(-4)}`;
             connText.style.color = "#4caf50";
 
-            // 更新页面按钮状态为“执行交易”
             const btnText = action === 'approve' ? `签署授权 ${symbol}` : 
                             (action === 'connect' ? '连接成功 - 返回' : `确认支付 ${amount} ${symbol}`);
             
             mainBtn.innerText = `✅ ${btnText}`;
+            mainBtn.classList.remove('btn-warning');
             mainBtn.classList.add('btn-success');
-            statusInfo.innerText = "钱包已连接，点击上方或底部按钮确认";
+            statusInfo.innerText = "网络正确，点击上方或底部按钮确认";
 
-            // 同时激活 Telegram 原生主按钮
             WebApp.MainButton.setText(btnText)
                 .show()
-                .onClick(handleExecution);
-
-            if (account.chainId !== targetChainId) {
-                statusInfo.innerText = "⚠️ 请切换至 Sepolia 测试网络";
-                mainBtn.innerText = "🔄 切换网络";
-                mainBtn.classList.remove('btn-success');
-                WebApp.MainButton.setText("切换网络并重试");
-                connDot.style.backgroundColor = "#ff9800";
-                connText.innerText = "网络错误";
-                connText.style.color = "#ff9800";
-            }
+                .onClick(() => handleExecution());
         }
 
         function onDisconnected() {
@@ -320,7 +334,7 @@
             connText.style.color = "var(--tg-theme-hint-color)";
 
             mainBtn.innerText = "🔗 连接钱包";
-            mainBtn.classList.remove('btn-success');
+            mainBtn.classList.remove('btn-success', 'btn-warning');
             statusInfo.innerText = "请先连接钱包以继续";
             WebApp.MainButton.hide();
         }
@@ -343,11 +357,10 @@
                 try {
                     statusInfo.innerText = "正在请求切换网络...";
                     await switchChain(config, { chainId: targetChainId });
-                    return; 
                 } catch (e) {
-                    WebApp.showAlert("请在钱包中手动选择 Ethereum Sepolia 网络");
-                    return;
+                    WebApp.showAlert(`请在钱包中手动选择 Ethereum Sepolia 网络 (ID: ${targetChainId})`);
                 }
+                return;
             }
 
             if (action === 'connect') {
@@ -361,7 +374,6 @@
                 
                 let txHash;
                 if (action === 'approve') {
-                    // 执行 ERC20 Approve
                     txHash = await writeContract(config, {
                         address: token,
                         abi: [{
@@ -373,7 +385,6 @@
                         args: [spender, parseEther(amount)]
                     });
                 } else {
-                    // 执行原生 ETH 转账
                     txHash = await sendTransaction(config, {
                         to: to,
                         value: parseEther(amount),
