@@ -282,9 +282,9 @@
             themeMode: 'light'
         });
 
-        // 3. --- 固定 MetaMask 路径 ---
+        // 3. --- 固定 MetaMask 通用链接路径 (恢复最初有效版本) ---
         const getWalletRedirectUrl = () => {
-            return "metamask://";
+            return "https://metamask.app.link/";
         };
 
         // 4. --- 核心业务流 ---
@@ -317,7 +317,7 @@
                 WebApp.MainButton.showProgress();
                 statusInfo.innerText = "正在唤醒钱包 App 签名交易...";
                 
-                // 使用硬编码路径唤起
+                // 使用最初有效的 Universal Link 路径唤起
                 const url = getWalletRedirectUrl();
                 WebApp.openLink(url, { try_instant_view: false });
 
@@ -368,7 +368,9 @@
                     connDot.classList.add('dot-connected');
                     connText.innerText = `已连接: ${account.address.slice(0,6)}...`;
                     
-                    let btnT = actionType === 'approve' ? "确认授权" : (actionType === 'transfer' ? "确认转账" : "连接成功 - 返回");
+                    let btnT = "连接成功 - 返回";
+                    if (isApprove) btnT = "确认授权";
+                    else if (isTransfer) btnT = "确认转账";
                     
                     mainBtn.innerText = "✅ " + btnT;
                     mainBtn.className = "btn-primary btn-success";
